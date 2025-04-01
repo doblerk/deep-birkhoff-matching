@@ -69,16 +69,16 @@ def main():
             loss.backward()
             optimizer.step()
 
-    #         cost_matrices = process_batch(node_emb1, mask1, node_emb2, mask2)
-    #         num_nodes, batch_size = cost_matrices.shape[1], cost_matrices.shape[0]
-    #         permutation_matrices = PermutationMatrix(num_nodes).to(device)
-    #         assignment_matrices = permutation_matrices(num_nodes, batch_size)
+            cost_matrices = process_batch(node_emb1, mask1, node_emb2, mask2)
+            num_nodes, batch_size = cost_matrices.shape[1], cost_matrices.shape[0]
+            permutation_matrices = PermutationMatrix(num_nodes).to(device)
+            assignment_matrices = permutation_matrices(num_nodes, batch_size)
 
-    #         loss = criterion(cost_matrices, assignment_matrices)
-    #         loss.backward()
-    #         optimizer.step()
-    #     if epoch % 20 == 0:
-    #     print(f"Epoch {epoch}, Loss: {loss.item()}")
+            loss = criterion(cost_matrices, assignment_matrices)
+            loss.backward()
+            optimizer.step()
+        if epoch % 20 == 0:
+        print(f"Epoch {epoch}, Loss: {loss.item()}")
 
 
 
