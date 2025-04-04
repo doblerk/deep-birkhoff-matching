@@ -10,16 +10,15 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset
 
 
-https://arxiv.org/pdf/2304.02458
-https://www.pragmatic.ml/sparse-sinkhorn-attention/
 
 
-def calc_cost_matrix(emb1, emb2, max_size):
-  n1, n2 = emb1.size(0), emb2.size(0)
-  cost_matrix = torch.cdist(emb1, emb2, p=2)
-  square_cost_matrix = torch.ones((max_size, max_size), device=cost_matrix.device)
-  square_cost_matrix[:n1, :n2] = cost_matrix
-  return square_cost_matrix
+
+# def calc_cost_matrix(emb1, emb2, max_size):
+#   n1, n2 = emb1.size(0), emb2.size(0)
+#   cost_matrix = torch.cdist(emb1, emb2, p=2)
+#   square_cost_matrix = torch.ones((max_size, max_size), device=cost_matrix.device)
+#   square_cost_matrix[:n1, :n2] = cost_matrix
+#   return square_cost_matrix
 
 def process_batch(node_emb1, mask1, node_emb2, mask2):
   batch_size = node_emb1.shape[0]

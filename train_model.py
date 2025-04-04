@@ -13,7 +13,7 @@ from model import Model
 
 from data_aug import GraphPairDataset
 
-from diff_birkhoff import ContrastiveLoss
+from diff_birkhoff import compute_cost_matrix, pad_cost_matrix, ContrastiveLoss
 
 
 
@@ -53,7 +53,8 @@ def main():
             representations1, mask1 = to_dense_batch(node_representations1, batch1.batch)
             representations2, mask2 = to_dense_batch(node_representations2, batch2.batch)
 
-            # TODO: compute cost matrix based on node embeddings
+            cost_matrices = compute_cost_matrix(representations1, representations2)
+            padded_cost_matrices = pad_cost_matrix(cost_matrices)
 
             # TODO: create a predefined set of permutation matrices
             #       -> our problem is bounded: for 3x3 matrix, there are 6 possibles permutation matrices
