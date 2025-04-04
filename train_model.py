@@ -13,7 +13,10 @@ from model import Model
 
 from data_aug import GraphPairDataset
 
-from diff_birkhoff import compute_cost_matrix, pad_cost_matrix, ContrastiveLoss
+from diff_birkhoff import compute_cost_matrix, \
+                          pad_cost_matrix, \
+                          PermutationMatrix, \
+                          ContrastiveLoss
 
 
 
@@ -56,37 +59,21 @@ def main():
             cost_matrices = compute_cost_matrix(representations1, representations2)
             padded_cost_matrices = pad_cost_matrix(cost_matrices)
 
-            # TODO: create a predefined set of permutation matrices
-            #       -> our problem is bounded: for 3x3 matrix, there are 6 possibles permutation matrices
-            #       -> should we create a set of permutation matrices and vary this number as a hyperparameter?
+            B, N, N = padded_cost_matrices.shape
+            k_plus_one = N + 1
 
-            # TODO: run the procedure to learn alpha weights of the Birkhoff polytope
-            #       -> use a limited number of permutation matrices (Carathéodory's theorem)
+            pm = PermutationMatrix()
+            perm_matrices = pm.generate_permutation_matrices(B, N, k_plus_one).to(device)
+
+            soft_assignment_matrices = pm(perm_matrices)
+
+            predicted_ged = criterion(cost_matrices, soft_assignment_matrices)
+            true_ged = get_true_ged()
             
-            # TODO: compute soft assignment matrices
-            #       -> torch.einsum('bk,bkij->bij', alphas, permutation_matrices)
+            loss = torch.nn.functional.mse_loss(predicted_ged, true_ged)
 
-            loss = criterion(cost_matrices, soft_assignment_matrices)
             loss.backward()
             optimizer.step()
-
-            cost_matrices = process_batch(node_emb1, mask1, node_emb2, mask2)
-            num_nodes, batch_size = cost_matrices.shape[1], cost_matrices.shape[0]
-            permutation_matrices = PermutationMatrix(num_nodes).to(device)
-            assignment_matrices = permutation_matrices(num_nodes, batch_size)
-
-            loss = criterion(cost_matrices, assignment_matrices)
-            loss.backward()
-            optimizer.step()
-        if epoch % 20 == 0:
-        print(f"Epoch {epoch}, Loss: {loss.item()}")
-
-
-
-
-
-
-
 
 
 if __name__ == '__main__':

@@ -10,10 +10,18 @@
         - Deterministically sample k + 1 permutation matrices from the hull set.
     - We currently determine the size of the largest graph(s) in a batch and pad all cost matrices accordingly so that they are all square and of the same size.
         - Could we generate permutation matrices on the fly instead?
+        - We re-initialize alpha weights everytime for different permutation matrices.
+            - Can we converge? Wouldn't it be better to compute a set of pre-generated permutation matrices so that we just have to learn weights for the same set of alphas?
+            - Should we implement an exponential moving average across batches to ensure smooth updates?
+- For the loss function, ground truths GED and predicted GED are not in the same order of magnitudes. Should we apply a transformation?
 
 #### TODOs
 - [x] Implement a function to store ground truth labels as a dictionary -> constant lookup.
 - [x] Implement a function to compute cost matrices.
+- [x] Implement a function to sample permutation matrices.
+- [x] Implement a way to learn alpha weights.
+- [x] Implement a way to compute soft assignment matrices.
+- [x] Implement a way to compute the loss.
 - [ ] Implement two different strategies to efficiently sample permutation matrices.
 - [ ] Extend the framework to a self-supervised learning approach. 
 
