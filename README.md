@@ -14,6 +14,9 @@
             - Can we converge? Wouldn't it be better to compute a set of pre-generated permutation matrices so that we just have to learn weights for the same set of alphas?
             - Should we implement an exponential moving average across batches to ensure smooth updates?
 - For the loss function, ground truths GED and predicted GED are not in the same order of magnitudes. Should we apply a transformation?
+- Currently, we randomly generate k+1 permutation matrices on the fly.
+    - Can we randomly generate k+1 or N permutation matrices at the very beginning so that we reuse the same throughout the whole training?
+        - Then, we can also vary N and see how this affects convergence and performance.
 
 #### TODOs
 - [x] Implement a function to store ground truth labels as a dictionary -> constant lookup.

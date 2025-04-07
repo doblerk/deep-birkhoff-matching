@@ -36,24 +36,21 @@ class PermutationMatrix(nn.Module):
         """
         Generates permutation matrices based on Carathéodory's Theorem.
         """
-        perms = list(permutations(range(N)))
         sampled_perm_matrices = torch.zeros((batch_size, k_plus_one, N, N))
         for b in range(batch_size): # iterate over square cost matrices
-            sampled_perms = sample(perms, min(k_plus_one, len(perms)))
-            for i, perm in enumerate(sampled_perms):
-                for j, p in enumerate(perm):
-                    sampled_perm_matrices[b, i, j, p] = 1.0
+            for i in range(k_plus_one):
+                perm = torch.randperm(N)
+                sampled_perm_matrices[b, i, torch.arange(N), perm] = 1.0
         return sampled_perm_matrices # shape: (B, k+1, N, N)
     
     def forward(self, perm_matrices, temperature=0.1):
         B, k_plus_one, N, N = perm_matrices.shape
         # Learnable alpha weights (B, k+1)
-        alphas = torch.Parameter(
-            torch.nn.functional.softmax(
-                torch.randn(B, k_plus_one, device=perm_matrices.device) / temperature,
-                dim=1,
-            )
+        alphas = torch.nn.functional.softmax(
+            torch.randn(B, k_plus_one, device=perm_matrices.device) / temperature, 
+            dim=1
         )
+        
         soft_assignment_matrices = torch.einsum('bk,bkij->bij', alphas, perm_matrices)
         return soft_assignment_matrices
 

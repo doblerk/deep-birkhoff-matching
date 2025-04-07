@@ -20,6 +20,12 @@ from diff_birkhoff import compute_cost_matrix, \
 
 
 
+def get_true_ged(batch1, batch2):
+    graphs_batch1, graphs_batch2 = torch.unique(batch1), torch.unique(batch2)
+    print(graphs_batch1)
+    print(graphs_batch2)
+    return
+
 
 def main():
 
@@ -43,20 +49,24 @@ def main():
     criterion = ContrastiveLoss()
 
     for epoch in range(1):
+        
         model.train()
+        
         for batch in dataloader:
+            print('New Batch')
             batch1, batch2, ged_labels = batch
             batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
 
             optimizer.zero_grad()
 
-            node_representations1 = model(batch1.x, batch1.edge_index)
-            node_representations2 = model(batch2.x, batch2.edge_index)
+            node_representations_b1 = model(batch1.x, batch1.edge_index)
+            node_representations_b2 = model(batch2.x, batch2.edge_index)
 
-            representations1, mask1 = to_dense_batch(node_representations1, batch1.batch)
-            representations2, mask2 = to_dense_batch(node_representations2, batch2.batch)
+            dense_b1, mask1 = to_dense_batch(node_representations_b1, batch1.batch)
+            dense_b2, mask2 = to_dense_batch(node_representations_b2, batch2.batch)
+            
+            cost_matrices = compute_cost_matrix(dense_b1, dense_b2)
 
-            cost_matrices = compute_cost_matrix(representations1, representations2)
             padded_cost_matrices = pad_cost_matrix(cost_matrices)
 
             B, N, N = padded_cost_matrices.shape
@@ -67,8 +77,9 @@ def main():
 
             soft_assignment_matrices = pm(perm_matrices)
 
-            predicted_ged = criterion(cost_matrices, soft_assignment_matrices)
-            true_ged = get_true_ged()
+            predicted_ged = criterion(padded_cost_matrices, soft_assignment_matrices)
+            
+            true_ged = torch.sum(ged_labels)
             
             loss = torch.nn.functional.mse_loss(predicted_ged, true_ged)
 
