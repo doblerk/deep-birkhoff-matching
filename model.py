@@ -67,13 +67,14 @@ class Model(torch.nn.Module):
 
         self.input_proj = Linear(input_dim, hidden_dim) if input_dim != hidden_dim else None
     
-    def forward(self, x, edge_index):
+    def freeze_params(self, encoder):
+        for param in encoder.parameters():
+            param.requires_grad = False
+    
+    def forward(self, x, edge_index, batch):
         x_residual = self.input_proj(x) if self.input_proj is not None else x
-        node_embeddings = []
         for layer in self.conv_layers:
             x = layer(x, edge_index)
             x = x + x_residual
             x_residual = x
-            node_embeddings.append(x)
-        # returns node representations of the last message-passing layer
-        return node_embeddings[-1]
+        return x, global_add_pool(x, batch)
