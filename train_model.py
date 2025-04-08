@@ -73,31 +73,44 @@ def train_triplet_encoder(loader, encoder, device, epochs=1):
         total_loss = 0
 
         for triplet in loader:
-            
-            anchor_info, positive_info, negative_info = triplet
 
-            graphs = [anchor_info[0], positive_info[0], negative_info[0]]
-            node_idxs = [anchor_info[1], positive_info[1], negative_info[1]]
+            # anchor_info, positive_info, negative_info = triplet
 
-            batch_graphs = [loader.dataset.graphs[i.tolist()] for i in graphs]
-            batch = Batch.from_data_list(batch_graphs).to(device) # bug here
+            # graphs = [anchor_info[0], positive_info[0], negative_info[0]]
+            # node_idxs = [anchor_info[1], positive_info[1], negative_info[1]]
 
-        #     optimizer.zero_grad()
+            # batch_graphs = [loader.dataset.graphs[i.tolist()] for i in graphs]
+            # batch = Batch.from_data_list(batch_graphs).to(device) # bug here
+
+            anchor_graphs, pos_graphs, neg_graphs = triplet
+
+            a_batch = Batch.from_data_list(anchor_graphs).to(device)
+            p_batch = Batch.from_data_list(pos_graphs).to(device)
+            n_batch = Batch.from_data_list(neg_graphs).to(device)
+
+            optimizer.zero_grad()
+
+            # _, graph_embeddings = encoder(batch.x, batch.edge_index, batch.batch)
+
+            _, a_graph_emb = encoder(a_batch.x, a_batch.edge_index, a_batch.batch)
+            _, p_graph_emb = encoder(p_batch.x, p_batch.edge_index, p_batch.batch)
+            _, n_graph_emb = encoder(n_batch.x, n_batch.edge_index, n_batch.batch)
 
         #     node_embs, _ = encoder(batch.x, batch.edge_index, batch.batch)
 
         #     anchor_node = node_embs[node_idxs[0]]
         #     pos_node = node_embs[node_idxs[1]]
         #     neg_node = node_embs[node_idxs[2]]
+            loss = critertion(a_graph_emb, p_graph_emb, n_graph_emb) # ensure this is done between each pair batch-wise
 
         #     loss = critertion(anchor_node, pos_node, neg_node)
 
-        #     loss.backward()
-        #     optimizer.step()
+            loss.backward()
+            optimizer.step()
 
-        #     total_loss += loss.item()
+            total_loss += loss.item()
 
-        # print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {total_loss:.4f}")
+        print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {total_loss:.4f}")
     
     return encoder
 

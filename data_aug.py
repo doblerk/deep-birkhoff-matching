@@ -55,6 +55,39 @@ class TripletGraphDataset(Dataset):
         return self.triplets[idx]
 
 
+class TripletGraphDataset(Dataset):
+
+    def __init__(self, graphs, ged_labels):
+        self.graphs = graphs
+        self.ged_labels = ged_labels
+  
+    def __getitem__(self, anchor_idx):
+        num_graphs = len(self.graphs)
+        
+        anchor_graph = self.graphs[anchor_idx]
+
+        candidates = [
+            (i, self._get_ged(anchor_idx, i))
+            for i in range(num_graphs) if i != anchor_idx
+            ]
+        candidates.sort(key=lambda x: x[1])
+
+        # Find the most similar and dissimilar graphs
+        pos_graph_idx = candidates[0][0]
+        neg_graph_idx = candidates[-1][0]
+
+        pos_graph = self.graphs[pos_graph_idx]
+        neg_graph = self.graphs[neg_graph_idx]
+
+        info = (
+            (anchor_idx, anchor_graph),
+            (pos_graph_idx, pos_graph),
+            (neg_graph_idx, neg_graph)
+        )
+
+        return anchor_graph, pos_graph, neg_graph
+        
+
 class GraphPairDataset(Dataset):
 
     def __init__(self, graphs, ged_labels):
