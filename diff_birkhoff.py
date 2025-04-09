@@ -7,22 +7,10 @@ from random import sample
 from itertools import permutations
 
 
-def compute_cost_matrix(representations1, representations2):
-    return torch.cdist(representations1, representations2, p=2)
-
-
-def pad_cost_matrix(cost_matrices):
-    B, N, M = cost_matrices.shape
-    max_size = max(N, M)
-    padded_cost_matrices = torch.ones((B, max_size, max_size), device=cost_matrices.device)
-    padded_cost_matrices[:, :N, :M] = cost_matrices
-    return padded_cost_matrices
-
-
-class ContrastiveLoss(nn.Module):
+class SoftGEDLoss(nn.Module):
 
     def __init__(self):
-        super(ContrastiveLoss, self).__init__()
+        super(SoftGEDLoss, self).__init__()
     
     def forward(self, cost_matrices, assignment_matrices):
         # return torch.einsum('bij,bij->', cost_matrices, assignment_matrices) # element-wise multiplication, followed by a summation
@@ -31,13 +19,13 @@ class ContrastiveLoss(nn.Module):
 
 class TripletLoss(nn.Module):
 
-    def __init__(self, margin=1.0):
+    def __init__(self, margin=0.2):
         super(TripletLoss, self).__init__()
         self.margin = margin
     
     def forward(self, anchor, positive, negative):
-        pos_dist = F.pairwise_distance(anchor, positive, p=2)
-        neg_dist = F.pairwise_distance(anchor, negative, p=2)
+        pos_dist = (anchor - positive).pow(2).sum(1)
+        neg_dist = (anchor - negative).pow(2).sum(1)
         return F.relu(pos_dist - neg_dist + self.margin).mean()
 
 
@@ -65,10 +53,3 @@ class PermutationMatrix(nn.Module):
             dim=-1
         ).to(perm_matrices.device)
         return torch.einsum('bk,bkij->bij', alphas, perm_matrices)
-
-
-
-  
-
-    
-  
