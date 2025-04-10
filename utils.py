@@ -1,9 +1,24 @@
+import numpy as np
+
 import torch
 
 import matplotlib.pyplot as plt
 
 from sklearn.manifold import TSNE
 from itertools import combinations
+
+
+def generate_permutation_bank(n, k_plus_one):
+    np.random.seed(42)
+    perms = []
+    for i in k_plus_one:
+        perms.append(tuple(np.random.permutation(n)))
+    return torch.tensor(perms, dtype=torch.int8)
+
+
+def permutation_vector_to_matrix(perm_vector):
+    n = perm_vector.size(0)
+    return torch.nn.functional.one_hot(perm_vector, num_classes=n)
 
 
 def compute_cost_matrix(representations1, representations2):

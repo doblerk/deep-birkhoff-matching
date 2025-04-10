@@ -10,7 +10,8 @@ from torch_geometric.datasets import TUDataset
 from utils import get_ged_labels, \
                   compute_cost_matrix, \
                   pad_cost_matrix, \
-                  visualize_node_embeddings
+                  visualize_node_embeddings, \
+                  generate_permutation_bank
 
 from model import Model
 
@@ -167,6 +168,11 @@ def main():
 
     encoder = train_triplet_encoder(triplet_loader, encoder, device)
     encoder.freeze_params(encoder) # you should not only freeze, but checkpoint the model as well
+
+    max_graph_size = max([g.num_node for g in dataset])
+    k_plus_one = max_graph_size ** 2 + 1 # lower bound (theoretical anchor)
+
+    perm_vectors = generate_permutation_bank(max_graph_size, k_plus_one)
 
     # train_ged_supervised(graph_pair_loader, encoder, device)
 

@@ -1,3 +1,4 @@
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -29,7 +30,28 @@ class TripletLoss(nn.Module):
         return F.relu(pos_dist - neg_dist + self.margin).mean()
 
 
-class PermutationMatrix(nn.Module):
+class PermutationPool:
+
+    def __init__(self, n, k, seed: int = 42):
+        np.random.seed(seed)
+        self.perm_vectors = self._generate_permutation_vectors(n, k)
+        self.n = n
+        self.k = k
+    
+    def _generate_permutation_vectors(self, n, k):
+        perms = []
+        for i in range(k):
+            perms.append(tuple(np.random.permutation(n)))
+        return torch.tensor(perms, dtype=torch.int8)
+    
+    def get_vectors(self):
+        return self.perm_vectors
+
+    def get_matrix_batch(self):
+        return torch.nn.functional.one_hot(self.perm_vectors, num_classes=self.n)
+
+
+class AlphaPermutationLayer(nn.Module):
    
     def __init__(self, batch_size, k_plus_one):
         super(PermutationMatrix, self).__init__()
