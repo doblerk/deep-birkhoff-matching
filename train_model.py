@@ -10,16 +10,14 @@ from torch_geometric.datasets import TUDataset
 from utils import get_ged_labels, \
                   compute_cost_matrix, \
                   pad_cost_matrix, \
-                  visualize_node_embeddings, \
-                  generate_permutation_bank
+                  visualize_node_embeddings
 
 from model import Model
 
 from data_aug import GraphPairDataset, TripletGraphDataset
 
-from diff_birkhoff import compute_cost_matrix, \
-                          pad_cost_matrix, \
-                          PermutationMatrix, \
+from diff_birkhoff import PermutationPool, \
+                          AlphaPermutationLayer, \
                           SoftGEDLoss, \
                           TripletLoss
 
@@ -63,7 +61,7 @@ def test(test_loader, device, model, criterion):
 
 def train_triplet_encoder(loader, encoder, device, epochs=101):
     encoder.train()
-    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=0.0001)
+    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     critertion = TripletLoss(margin=0.2)
 
     for epoch in range(epochs):
@@ -97,9 +95,10 @@ def train_triplet_encoder(loader, encoder, device, epochs=101):
     return encoder
 
 
-def train_ged_supervised(loader, encoder, device, epochs=101):
+def train_ged_supervised(loader, encoder, alpha_layer, device, max_graph_size, epochs=201):
     encoder.eval()
-    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=0.0001)
+    alpha_layer.train()
+    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-4, weight_decay=1e-5)
     criterion = SoftGEDLoss()
 
     for epoch in range(epochs):
@@ -121,15 +120,15 @@ def train_ged_supervised(loader, encoder, device, epochs=101):
             dense_b1, _ = to_dense_batch(node_repr_b1, batch1.batch) # [B, N1, D]
             dense_b2, _ = to_dense_batch(node_repr_b2, batch2.batch) # [B, N2, D]
             
-            cost_matrices = compute_cost_matrix(dense_b1, dense_b2)  # [B, N, N]
-            padded_cost = pad_cost_matrix(cost_matrices)    # [B, N, N]
-
+            cost_matrices = compute_cost_matrix(dense_b1, dense_b2)      # [B, N, N]
+            padded_cost = pad_cost_matrix(cost_matrices, max_graph_size) # [B, N, N]
+        
+            # Soft assignment via learnable alpha-weighted permutation matrices
             B, N, _ = padded_cost.shape
-            k_plus_one = N + 1 # Carathéodory theorem
+            soft_assignment = alpha_layer()
 
-            pm = PermutationMatrix(B, k_plus_one).to(device)
-            perms = pm.generate_permutation_matrices(B, N, k_plus_one).to(device)
-            soft_assignments = pm(perms)
+            # Repeat assignment matrix across batch
+            soft_assignments = soft_assignment.unsqueeze(0).repeat(B, 1, 1)
 
             predicted_ged = criterion(padded_cost, soft_assignments) # (B,)
             
@@ -169,12 +168,15 @@ def main():
     encoder = train_triplet_encoder(triplet_loader, encoder, device)
     encoder.freeze_params(encoder) # you should not only freeze, but checkpoint the model as well
 
-    max_graph_size = max([g.num_node for g in dataset])
-    k_plus_one = max_graph_size ** 2 + 1 # lower bound (theoretical anchor)
+    max_graph_size = max([g.num_nodes for g in dataset])
+    k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
+    k = 100
 
-    perm_vectors = generate_permutation_bank(max_graph_size, k_plus_one)
+    perm_pool = PermutationPool(max_graph_size, k)
 
-    # train_ged_supervised(graph_pair_loader, encoder, device)
+    alpha_layer = AlphaPermutationLayer(perm_pool).to(device)
+
+    train_ged_supervised(graph_pair_loader, encoder, alpha_layer, device, max_graph_size)
 
 
 if __name__ == '__main__':

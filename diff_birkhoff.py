@@ -34,44 +34,31 @@ class PermutationPool:
 
     def __init__(self, n, k, seed: int = 42):
         np.random.seed(seed)
-        self.perm_vectors = self._generate_permutation_vectors(n, k)
         self.n = n
         self.k = k
+        self.perm_vectors = self._generate_permutation_vectors(n, k)
     
     def _generate_permutation_vectors(self, n, k):
         perms = []
-        for i in range(k):
+        for i in range(int(k)):
             perms.append(tuple(np.random.permutation(n)))
-        return torch.tensor(perms, dtype=torch.int8)
+        return torch.tensor(perms, dtype=torch.long)
     
     def get_vectors(self):
         return self.perm_vectors
 
     def get_matrix_batch(self):
-        return torch.nn.functional.one_hot(self.perm_vectors, num_classes=self.n)
+        return torch.nn.functional.one_hot(self.perm_vectors, num_classes=self.n).float()
 
 
 class AlphaPermutationLayer(nn.Module):
    
-    def __init__(self, batch_size, k_plus_one):
-        super(PermutationMatrix, self).__init__()
-        self.alpha_weights = nn.Parameter(torch.randn(batch_size, k_plus_one))
-    
-    def generate_permutation_matrices(self, batch_size, N, k_plus_one):
-        """
-        Generates permutation matrices based on Carathéodory's Theorem.
-        """
-        perm_matrices = torch.zeros((batch_size, k_plus_one, N, N))
-        for b in range(batch_size): # iterate over square cost matrices
-            for i in range(k_plus_one):
-                perm = torch.randperm(N)
-                perm_matrices[b, i, torch.arange(N), perm] = 1.0
-        return perm_matrices # shape: (B, k+1, N, N)
-    
-    def forward(self, perm_matrices, temperature=0.1):
-        # Learnable alpha weights (B, k+1)
-        alphas = torch.nn.functional.softmax(
-            self.alpha_weights / temperature, 
-            dim=-1
-        ).to(perm_matrices.device)
-        return torch.einsum('bk,bkij->bij', alphas, perm_matrices)
+    def __init__(self, perm_pool: PermutationPool):
+        super(AlphaPermutationLayer, self).__init__()
+        self.perm_pool = perm_pool
+        self.alpha_weights = nn.Parameter(torch.randn(perm_pool.k))
+        
+    def forward(self, temperature=0.1):
+        perms = self.perm_pool.get_matrix_batch().to(self.alpha_weights.device)
+        alphas = torch.softmax(self.alpha_weights / temperature, dim=0)
+        return torch.einsum('k,kij->ij', alphas, perms)
