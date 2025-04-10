@@ -59,7 +59,7 @@ def test(test_loader, device, model, criterion):
     return history
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=101):
+def train_triplet_encoder(loader, encoder, device, epochs=1):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     critertion = TripletLoss(margin=0.2)
@@ -95,7 +95,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=101):
     return encoder
 
 
-def train_ged_supervised(loader, encoder, alpha_layer, device, max_graph_size, epochs=201):
+def train_ged_supervised(loader, encoder, alpha_layer, device, max_graph_size, epochs=1):
     encoder.eval()
     alpha_layer.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-4, weight_decay=1e-5)
@@ -116,31 +116,37 @@ def train_ged_supervised(loader, encoder, alpha_layer, device, max_graph_size, e
             with torch.no_grad():
                 node_repr_b1, _ = encoder(batch1.x, batch1.edge_index, batch1.batch)
                 node_repr_b2, _ = encoder(batch2.x, batch2.edge_index, batch2.batch)
+            
+            dense_b1, _ = to_dense_batch(node_repr_b1, batch1.batch, fill_value=1000) # [B, N1, D]
+            dense_b2, _ = to_dense_batch(node_repr_b2, batch2.batch, fill_value=1000) # [B, N2, D]
 
-            dense_b1, _ = to_dense_batch(node_repr_b1, batch1.batch) # [B, N1, D]
-            dense_b2, _ = to_dense_batch(node_repr_b2, batch2.batch) # [B, N2, D]
+            print(dense_b1.shape, ' ', dense_b2.shape)
             
             cost_matrices = compute_cost_matrix(dense_b1, dense_b2)      # [B, N, N]
-            padded_cost = pad_cost_matrix(cost_matrices, max_graph_size) # [B, N, N]
-        
-            # Soft assignment via learnable alpha-weighted permutation matrices
-            B, N, _ = padded_cost.shape
-            soft_assignment = alpha_layer()
-
-            # Repeat assignment matrix across batch
-            soft_assignments = soft_assignment.unsqueeze(0).repeat(B, 1, 1)
-
-            predicted_ged = criterion(padded_cost, soft_assignments) # (B,)
             
-            loss = F.mse_loss(predicted_ged, ged_labels, reduction='mean')
+            print(dense_b1[0].shape, ' ', dense_b2[0].shape)
+            print(cost_matrices[0])
 
-            loss.backward()
-            optimizer.step()
+            padded_cost = pad_cost_matrix(cost_matrices, max_graph_size) # [B, N, N]
+            print(padded_cost[0])
+        #     # Soft assignment via learnable alpha-weighted permutation matrices
+        #     B, N, _ = padded_cost.shape
+        #     soft_assignment = alpha_layer()
 
-            total_loss += loss.item() * batch1.y.size(0)
-        
-        average_loss = total_loss / len(loader.dataset)
-        print(f"[GED] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
+        #     # Repeat assignment matrix across batch
+        #     soft_assignments = soft_assignment.unsqueeze(0).repeat(B, 1, 1)
+
+        #     predicted_ged = criterion(padded_cost, soft_assignments) # (B,)
+            
+        #     loss = F.mse_loss(predicted_ged, ged_labels, reduction='mean')
+
+        #     loss.backward()
+        #     optimizer.step()
+
+        #     total_loss += loss.item() * batch1.y.size(0)
+            break
+        # average_loss = total_loss / len(loader.dataset)
+        # print(f"[GED] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
 
 
 def main():
@@ -170,7 +176,7 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 100
+    k = 10
 
     perm_pool = PermutationPool(max_graph_size, k)
 

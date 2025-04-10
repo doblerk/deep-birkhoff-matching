@@ -14,7 +14,7 @@ def compute_cost_matrix(representations1, representations2):
 
 def pad_cost_matrix(cost_matrices, max_graph_size):
     B, N, M = cost_matrices.shape
-    padded_cost_matrices = torch.ones((B, max_graph_size, max_graph_size), device=cost_matrices.device)
+    padded_cost_matrices = torch.ones((B, max_graph_size, max_graph_size), device=cost_matrices.device) # NOT NECESSARILY ONES BUT HIGHER VALUES
     padded_cost_matrices[:, :N, :M] = cost_matrices
     return padded_cost_matrices
 
