@@ -1,6 +1,7 @@
 import numpy as np
 
 import torch
+import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
 
@@ -12,11 +13,26 @@ def compute_cost_matrix(representations1, representations2):
     return torch.cdist(representations1, representations2, p=2)
 
 
-def pad_cost_matrix(cost_matrices, max_graph_size):
-    B, N, M = cost_matrices.shape
-    padded_cost_matrices = torch.ones((B, max_graph_size, max_graph_size), device=cost_matrices.device) # NOT NECESSARILY ONES BUT HIGHER VALUES
-    padded_cost_matrices[:, :N, :M] = cost_matrices
-    return padded_cost_matrices
+def compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2):
+    distance_matrices = []
+    num_graphs = batch1.batch.max().item() + 1
+    for i in range(num_graphs):
+        nodes1 = node_repr_b1[batch1.batch == i]
+        nodes2 = node_repr_b2[batch2.batch == i]
+        dist = torch.cdist(nodes1, nodes2)
+        distance_matrices.append(dist)
+    return distance_matrices
+
+
+def pad_cost_matrices(cost_matrices, max_graph_size, pad_value=0.0):
+    padded = []
+    for cost in cost_matrices:
+        n1, n2 = cost.shape
+        pad_bottom = max_graph_size - n1
+        pad_right = max_graph_size - n2
+        padded_cost = F.pad(cost, (0, pad_right, 0, pad_bottom), value=pad_value)
+        padded.append(padded_cost)
+    return torch.stack(padded)
 
 
 def get_ged_labels(distance_matrix):

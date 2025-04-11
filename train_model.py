@@ -9,15 +9,17 @@ from torch_geometric.datasets import TUDataset
 
 from utils import get_ged_labels, \
                   compute_cost_matrix, \
-                  pad_cost_matrix, \
+                  compute_graphwise_node_distances, \
+                  pad_cost_matrices, \
                   visualize_node_embeddings
 
 from model import Model
 
-from data_aug import GraphPairDataset, TripletGraphDataset
+from data_aug import TripletDataset, SiameseDataset
 
 from diff_birkhoff import PermutationPool, \
                           AlphaPermutationLayer, \
+                          LearnablePaddingAttention, \
                           SoftGEDLoss, \
                           TripletLoss
 
@@ -59,7 +61,7 @@ def test(test_loader, device, model, criterion):
     return history
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=1):
+def train_triplet_encoder(loader, encoder, device, epochs=11):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     critertion = TripletLoss(margin=0.2)
@@ -67,6 +69,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=1):
     for epoch in range(epochs):
 
         total_loss = 0
+        total_samples = 0
 
         for triplet in loader:
 
@@ -88,8 +91,9 @@ def train_triplet_encoder(loader, encoder, device, epochs=1):
             optimizer.step()
 
             total_loss += loss.item() * anchor_graphs.y.size(0)
+            total_samples += anchor_graphs.y.size(0)
 
-        average_loss = total_loss / len(loader.dataset)
+        average_loss = total_loss / total_samples
         print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
     
     return encoder
@@ -98,12 +102,15 @@ def train_triplet_encoder(loader, encoder, device, epochs=1):
 def train_ged_supervised(loader, encoder, alpha_layer, device, max_graph_size, epochs=1):
     encoder.eval()
     alpha_layer.train()
-    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-4, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(alpha_layer.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = SoftGEDLoss()
+
+    attention_layer = LearnablePaddingAttention(max_graph_size)
 
     for epoch in range(epochs):
 
         total_loss = 0
+        total_samples = 0
 
         for batch in loader:
 
@@ -114,39 +121,48 @@ def train_ged_supervised(loader, encoder, alpha_layer, device, max_graph_size, e
             optimizer.zero_grad()
 
             with torch.no_grad():
-                node_repr_b1, _ = encoder(batch1.x, batch1.edge_index, batch1.batch)
-                node_repr_b2, _ = encoder(batch2.x, batch2.edge_index, batch2.batch)
+                node_repr_b1, _ = encoder(batch1.x, batch1.edge_index, batch1.batch)    # [n1, D]
+                node_repr_b2, _ = encoder(batch2.x, batch2.edge_index, batch2.batch)    # [n2, D]
+
+            # dense_b1, _ = to_dense_batch(node_repr_b1, batch1.batch, fill_value=1000) # [B, N1, D]
+            # dense_b2, _ = to_dense_batch(node_repr_b2, batch2.batch, fill_value=1000) # [B, N2, D]
             
-            dense_b1, _ = to_dense_batch(node_repr_b1, batch1.batch, fill_value=1000) # [B, N1, D]
-            dense_b2, _ = to_dense_batch(node_repr_b2, batch2.batch, fill_value=1000) # [B, N2, D]
+            # cost_matrices = compute_cost_matrix(dense_b1, dense_b2)      # [B, N1, N2]
+            cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
 
-            print(dense_b1.shape, ' ', dense_b2.shape)
+            # padded_cost = pad_cost_matrix(cost_matrices, max_graph_size) # [B, maxN, maxN]
+            padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+
+            # Get the mask for padding (1 for valid, 0 for padded)
+            B, _, _ = padded_cost_matrices.shape
+            original_size1 = batch1.num_nodes
+            original_size2 = batch2.num_nodes
+            mask = (torch.ones(max_graph_size, max_graph_size, device=device).tril(0)[:original_size1, :original_size2])
+
+            print(mask.shape)
+
+            # Apply learnable attention to focus on the real parts of the cost matrix
+            adjusted_cost_matrices = attention_layer(padded_cost_matrices, mask)
+
+            # Soft assignment via learnable alpha-weighted permutation matrices
+            soft_assignment = alpha_layer()
+
+            # Repeat assignment matrix across batch
+            soft_assignments = soft_assignment.unsqueeze(0).repeat(B, 1, 1)
+
+            predicted_ged = criterion(adjusted_cost_matrices, soft_assignments) # (B,)
             
-            cost_matrices = compute_cost_matrix(dense_b1, dense_b2)      # [B, N, N]
-            
-            print(dense_b1[0].shape, ' ', dense_b2[0].shape)
-            print(cost_matrices[0])
+            loss = F.mse_loss(predicted_ged, ged_labels, reduction='mean')
 
-            padded_cost = pad_cost_matrix(cost_matrices, max_graph_size) # [B, N, N]
-            print(padded_cost[0])
-        #     # Soft assignment via learnable alpha-weighted permutation matrices
-        #     B, N, _ = padded_cost.shape
-        #     soft_assignment = alpha_layer()
+            loss.backward()
+            optimizer.step()
 
-        #     # Repeat assignment matrix across batch
-        #     soft_assignments = soft_assignment.unsqueeze(0).repeat(B, 1, 1)
-
-        #     predicted_ged = criterion(padded_cost, soft_assignments) # (B,)
-            
-        #     loss = F.mse_loss(predicted_ged, ged_labels, reduction='mean')
-
-        #     loss.backward()
-        #     optimizer.step()
-
-        #     total_loss += loss.item() * batch1.y.size(0)
+            total_loss += loss.item() * batch1.y.size(0)
+            total_samples += batch1.y.size(0)
             break
-        # average_loss = total_loss / len(loader.dataset)
-        # print(f"[GED] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
+        
+        average_loss = total_loss / total_samples
+        print(f"[GED] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
 
 
 def main():
@@ -161,12 +177,12 @@ def main():
     ged_labels = get_ged_labels(distance_matrix)
 
     # Prepare DataLoader
-    triplet_dataset = TripletGraphDataset(dataset, ged_labels)
-    graph_pair_dataset = GraphPairDataset(dataset, ged_labels)
+    triplet_dataset = TripletDataset(dataset, ged_labels)
+    siamese_dataset = SiameseDataset(dataset, ged_labels)
 
     data_loader = DataLoader(dataset, batch_size=32, shuffle=True)
     triplet_loader = DataLoader(triplet_dataset, batch_size=32, shuffle=True)
-    graph_pair_loader = DataLoader(graph_pair_dataset, batch_size=32, shuffle=True)
+    siamese_loader = DataLoader(siamese_dataset, batch_size=32, shuffle=True)
 
     # Model
     encoder = Model(dataset.num_features, 64, 3).to(device)
@@ -176,13 +192,13 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 10
+    k = 50
 
     perm_pool = PermutationPool(max_graph_size, k)
 
     alpha_layer = AlphaPermutationLayer(perm_pool).to(device)
 
-    train_ged_supervised(graph_pair_loader, encoder, alpha_layer, device, max_graph_size)
+    train_ged_supervised(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
 
 if __name__ == '__main__':

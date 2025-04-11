@@ -4,9 +4,10 @@ import numpy as np
 from torch.utils.data import Dataset
 
 
-class TripletGraphDataset(Dataset):
+class TripletDataset(Dataset):
 
     def __init__(self, graphs, ged_labels):
+        super(TripletDataset, self).__init__()
         self.graphs = graphs
         self.labels = [g.y.item() for g in graphs]
         self.ged_labels = ged_labels
@@ -31,12 +32,6 @@ class TripletGraphDataset(Dataset):
             else:
                 diff_class.append((idx, self._get_ged(anchor_idx, idx)))
 
-        # candidates = [
-        #     (i, self._get_ged(anchor_idx, i))
-        #     for i in range(num_graphs) if i != anchor_idx
-        #     ]
-        # candidates.sort(key=lambda x: x[1])
-
         # Hard positive = same class, max GED
         pos_graph_idx, _ = max(same_class, key=lambda x: x[1])
         # Hard negative = different class, min GED
@@ -48,12 +43,15 @@ class TripletGraphDataset(Dataset):
         return anchor_graph, pos_graph, neg_graph
         
 
-class GraphPairDataset(Dataset):
+class SiameseDataset(Dataset):
 
     def __init__(self, graphs, ged_labels):
-        super(GraphPairDataset, self).__init__()
+        super(SiameseDataset, self).__init__()
         self.graphs = graphs
         self.ged_labels = ged_labels # dictionnary mapping of "ground truth" ged -> constant lookup
+    
+    def _get_ged(self, i, j):
+        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
 
     def __len__(self):
         return len(self.graphs) 
@@ -62,17 +60,14 @@ class GraphPairDataset(Dataset):
         # Randomly select a second graph
         idx2 = np.random.randint(0, len(self.graphs) -1)
 
-        graph1 = self.graphs[idx]
-        graph2 = self.graphs[idx2]
+        # Graphs in batch1 are <= graphs in batch2
+        graph1, graph2 = (
+            (self.graphs[idx], self.graphs[idx2]) 
+            if self.graphs[idx].num_nodes <= self.graphs[idx2].num_nodes
+            else (self.graphs[idx2], self.graphs[idx]) 
+        )
 
         # Retrieve ground truth GED for this pair
-        if (idx, idx2) in self.ged_labels:
-            ged_value = self.ged_labels.get((idx, idx2))
-        elif (idx2, idx) in self.ged_labels:
-            ged_value = self.ged_labels.get((idx2, idx))
-        elif idx == idx2:
-            ged_value = 0.0
-        else:
-            ged_value = 0.0
+        ged_value = self._get_ged(idx, idx2)
 
         return graph1, graph2, torch.tensor(ged_value, dtype=torch.float)
