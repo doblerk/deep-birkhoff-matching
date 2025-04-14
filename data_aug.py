@@ -58,7 +58,7 @@ class SiameseDataset(Dataset):
 
     def __getitem__(self, idx):
         # Randomly select a second graph
-        idx2 = np.random.randint(0, len(self.graphs) -1)
+        idx2 = np.random.randint(0, len(self.graphs) - 1)
 
         # Graphs in batch1 are <= graphs in batch2
         graph1, graph2 = (
@@ -69,5 +69,7 @@ class SiameseDataset(Dataset):
 
         # Retrieve ground truth GED for this pair
         ged_value = self._get_ged(idx, idx2)
+
+        normalized_ged_value = ged_value / ( (graph1.num_nodes + graph2.num_nodes) / 2 )
 
         return graph1, graph2, torch.tensor(ged_value, dtype=torch.float)

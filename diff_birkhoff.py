@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from random import sample
-from itertools import permutations
+
+from scipy.stats import gaussian_kde
 
 
 class TripletLoss(nn.Module):
@@ -30,37 +31,100 @@ class SoftGEDLoss(nn.Module):
         return torch.sum(cost_matrices * assignment_matrices, dim=(1, 2)) # (B,)
 
 
-class PermutationPool:
+# class PermutationPool:
 
-    def __init__(self, n, k, seed: int = 42):
+#     def __init__(self, n, k, seed: int = 42):
+#         np.random.seed(seed)
+#         self.n = n
+#         self.k = k
+#         self.perm_vectors = self._generate_permutation_vectors(n, k)
+    
+#     def _generate_permutation_vectors(self, n, k):
+#         perms = []
+#         for i in range(int(k)):
+#             perms.append(tuple(np.random.permutation(n)))
+#         return torch.tensor(perms, dtype=torch.long)
+    
+#     def get_vectors(self):
+#         return self.perm_vectors
+
+#     def get_matrix_batch(self):
+#         return torch.nn.functional.one_hot(self.perm_vectors, num_classes=self.n).float()
+class PermutationPool:
+    def __init__(self, max_n, k, size_data, seed: int = 42):
+        """
+        Args:
+            max_n (int): Maximum graph size (i.e., full matrix size: max_n x max_n)
+            k (int): Number of permutation matrices to generate
+            size_data (np.ndarray): Array of shape (N, 2) containing historical (n, m) size pairs
+            seed (int): RNG seed for reproducibility
+        """
         np.random.seed(seed)
-        self.n = n
+        self.max_n = max_n
         self.k = k
-        self.perm_vectors = self._generate_permutation_vectors(n, k)
+        self.size_data = size_data
+        self.kde = gaussian_kde(size_data.T)
+        self.perm_vectors = self._generate_permutation_vectors()
     
-    def _generate_permutation_vectors(self, n, k):
+    def _sample_size(self):
+        """Sample a (n, m) pair from the empirical KDE distribution."""
+        while True:
+            sample = np.round(self.kde.resample(1)).astype(int).flatten()
+            n, m = sample
+            if 1 <= n <= self.max_n and 1 <= m <= self.max_n:
+                return n, m
+
+    def _generate_permutation_vectors(self):
+        """Generate permutation vectors of max_n length, padded/embedded."""
         perms = []
-        for i in range(int(k)):
-            perms.append(tuple(np.random.permutation(n)))
+
+        identity = np.arange(self.max_n)
+        perms.append(tuple(identity))
+
+        for _ in range(self.k - 1):
+            n, m = self._sample_size()
+            perm_len = min(n, m)
+
+            perm = np.random.permutation(perm_len)
+            vector = -1 * np.ones(self.max_n, dtype=int)
+            vector[:perm_len] = perm
+            perms.append(tuple(vector))
+
         return torch.tensor(perms, dtype=torch.long)
-    
+
     def get_vectors(self):
         return self.perm_vectors
 
     def get_matrix_batch(self):
-        return torch.nn.functional.one_hot(self.perm_vectors, num_classes=self.n).float()
-
+        """
+        Returns a batch of k permutation matrices of shape (k, max_n, max_n)
+        One-hot encoded, inactive rows filled with zeros
+        """
+        matrices = []
+        for vec in self.perm_vectors:
+            matrix = torch.eye(self.max_n)
+            active_indices = vec != -1
+            matrix[active_indices] = 0.0
+            for i, j in enumerate(vec):
+                if j != -1:
+                    matrix[i, j] = 1.0
+            matrices.append(matrix)
+        return torch.stack(matrices)
 
 class AlphaPermutationLayer(nn.Module):
    
     def __init__(self, perm_pool: PermutationPool):
         super(AlphaPermutationLayer, self).__init__()
         self.perm_pool = perm_pool
-        self.alpha_weights = nn.Parameter(torch.randn(perm_pool.k), requires_grad=True)
+        self.temperature = 0.6
+        self.alpha_logits = nn.Parameter(torch.randn(perm_pool.k), requires_grad=True)
+    
+    def get_alpha_weights(self):
+        return torch.softmax(self.alpha_logits / self.temperature, dim=0)
         
-    def forward(self, temperature=1.0):
-        perms = self.perm_pool.get_matrix_batch().to(self.alpha_weights.device)
-        alphas = torch.softmax(self.alpha_weights / temperature, dim=0)
+    def forward(self):
+        perms = self.perm_pool.get_matrix_batch().to(self.alpha_logits.device)
+        alphas = torch.softmax(self.alpha_logits / self.temperature, dim=0)
         return torch.einsum('k,kij->ij', alphas, perms)
 
 
@@ -71,7 +135,8 @@ class LearnablePaddingAttention(nn.Module):
         self.max_graph_size = max_graph_size
         self.attention_weights = nn.Parameter(torch.randn(max_graph_size, max_graph_size))
     
-    def forward(self, cost_matrix, mask):
-        attention_mask = torch.sigmoid(self.attention_weights).to(cost_matrix.device)
-        masked_cost_matrix = cost_matrix * attention_mask
-        return masked_cost_matrix * mask.unsqueeze(0)
+    def forward(self, cost_matrices, masks):
+        attention_mask = torch.sigmoid(self.attention_weights)
+        attention_mask = attention_mask.unsqueeze(0)
+        masked_cost_matrix = cost_matrices * attention_mask
+        return masked_cost_matrix * masks

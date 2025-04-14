@@ -17,6 +17,9 @@
 - Currently, we randomly generate k+1 permutation matrices on the fly.
     - Can we randomly generate k+1 or N permutation matrices at the very beginning so that we reuse the same throughout the whole training?
         - Then, we can also vary N and see how this affects convergence and performance.
+- We obtain soft assignment matrix (DSM), but we may convert it into a hard assignment matrix (permutation).
+    - Take max values per row?
+    - Take the permutation matrix with highest alpha?
 
 #### TODOs
 - [x] Implement a function to store ground truth labels as a dictionary -> constant lookup.
@@ -25,8 +28,10 @@
 - [x] Implement a way to learn alpha weights.
 - [x] Implement a way to compute soft assignment matrices.
 - [x] Implement a way to compute the loss.
-- [ ] Implement two different strategies to efficiently sample permutation matrices.
-- [ ] Extend the framework to a self-supervised learning approach. 
+- [x] Implement two different strategies to efficiently sample permutation matrices.
+- [ ] Explore adaptive pool refinement (e.g., replace worst-performing permutations periodically).
+- [ ] Investigate ensemble DSMs: learn separate alphas for structure vs features, then combine them.
+- [ ] Extend the framework to a self-supervised learning approach.
 
 #### Some References
 
