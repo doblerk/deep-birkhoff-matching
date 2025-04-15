@@ -47,7 +47,7 @@ def generate_attention_masks(batch_size, batch1, batch2, max_graph_size):
     return masks
 
 
-def plot_attention(attention_weights, epoch, save_path="./res/attention_epoch_aware_{epoch}.png"):
+def plot_attention(attention_weights, epoch, save_path="./res/attention_epoch_aware_test_{epoch}.png"):
     attn = torch.sigmoid(attention_weights).detach().cpu().numpy()
     plt.figure(figsize=(6, 5))
     sns.heatmap(attn, cmap="viridis", square=True, cbar=True)
