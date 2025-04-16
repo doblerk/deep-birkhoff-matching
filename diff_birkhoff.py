@@ -50,6 +50,8 @@ class SoftGEDLoss(nn.Module):
 
 #     def get_matrix_batch(self):
 #         return torch.nn.functional.one_hot(self.perm_vectors, num_classes=self.n).float()
+
+
 class PermutationPool:
     def __init__(self, max_n, k, size_data, seed: int = 42):
         """
@@ -114,46 +116,30 @@ class PermutationPool:
 
 class AlphaPermutationLayer(nn.Module):
    
-    def __init__(self perm_pool: PermutationPool):
+    def __init__(self, perm_pool: PermutationPool, embedding_dim: int):
         super(AlphaPermutationLayer, self).__init__()
         self.perm_pool = perm_pool
+        self.k = perm_pool.k
         self.temperature = 0.6
-        self.alpha_logits = nn.Parameter(torch.randn(perm_pool.k), requires_grad=True)
+
+        self.alpha_mlp = nn.Sequential(
+            nn.Linear(2 * embedding_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, self.k)
+        )
+
+        # self.alpha_logits = nn.Parameter(torch.randn(max_batch_size, perm_pool.k), requires_grad=True)
     
     def get_alpha_weights(self):
         return torch.softmax(self.alpha_logits / self.temperature, dim=0)
         
-    def forward(self):
-        perms = self.perm_pool.get_matrix_batch().to(self.alpha_logits.device)
-        alphas = torch.softmax(self.alpha_logits / self.temperature, dim=0)
-        return torch.einsum('k,kij->ij', alphas, perms)
-
-
-# class AlphaPermutationLayer(nn.Module):
-   
-#     def __init__(self, input_dim, perm_pool: PermutationPool):
-#         super(AlphaPermutationLayer, self).__init__()
-#         self.perm_pool = perm_pool
-#         self.temperature = 1.0
-#         self.k = perm_pool.k
-
-#         self.mlp = nn.Sequential(
-#             nn.Linear(input_dim, 128),
-#             nn.ReLU(),
-#             nn.Linear(128, self.k)
-#         )
-        
-#     def forward(self, z1, z2):
-#         perms = self.perm_pool.get_matrix_batch().to(z1.device) # (k, N, N)
-
-#         h = torch.cat([z1, z2], dim=1)
-#         alpha_logits = self.mlp(h) # (B, k)
-#         alpha = F.softmax(alpha_logits / self.temperature, dim=1)
-
-#         print(alpha)
-
-#         soft_assignments = torch.einsum('bk,kij->bij', alpha, perms)
-#         return soft_assignments, alpha
+    def forward(self, graph_repr_b1, graph_repr_b2):
+        pair_repr = torch.cat([graph_repr_b1, graph_repr_b2], dim=1) # (B, 2D)
+        alpha_logits = self.alpha_mlp(pair_repr) # (B, k)
+        alphas = F.softmax(alpha_logits / self.temperature, dim=1) # (B, k)
+        perms = self.perm_pool.get_matrix_batch().to(graph_repr_b1.device) # (B, maxN, maxN)
+        soft_assignments = torch.einsum('bk,kij->bij', alphas, perms)
+        return soft_assignments, alphas
 
 
 class LearnablePaddingAttention(nn.Module):

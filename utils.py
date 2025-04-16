@@ -36,6 +36,21 @@ def pad_cost_matrices(cost_matrices, max_graph_size, pad_value=0.0):
     return torch.stack(padded)
 
 
+def get_node_masks(batch, max_size):
+    """
+    batch: torch_geometric.data.Batch object
+    returns: [B, max_size] tensor, 1 for real nodes, 0 for padded
+    """
+    device = batch.batch.device
+    counts = batch.batch.bincount()
+    B = counts.size(0)
+
+    masks = torch.zeros(B, max_size, device=device)
+    for i, count in enumerate(counts):
+        masks[i, :count] = 1
+    return masks
+
+
 def generate_attention_masks(batch_size, batch1, batch2, max_graph_size):
     masks = torch.zeros(batch_size, max_graph_size, max_graph_size)
     num_nodes_b1 = np.bincount(batch1.batch.cpu().numpy())
