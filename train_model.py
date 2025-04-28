@@ -221,7 +221,7 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 100
+    k = 51
 
     perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
