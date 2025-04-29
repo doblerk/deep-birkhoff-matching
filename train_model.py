@@ -15,7 +15,7 @@ from utils import get_ged_labels, \
                   get_node_masks, \
                   generate_attention_masks, \
                   get_cost_matrices_distr, \
-                  visualize_node_embeddings, plot_attention, plot_ged
+                  visualize_node_embeddings, plot_attention, plot_ged, knn_classifier
 
 from model import Model
 
@@ -38,8 +38,8 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
     all_preds = []
     all_labels = []
 
-    pairs = []
-    t0 = time()
+    distance_matrix = np.zeros((188, 188), dtype=np.float32)
+    
     for batch in loader:
 
         batch1, batch2, ged_labels, idx1, idx2 = batch
@@ -74,8 +74,10 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
         all_preds.append(normalized_predicted_ged.cpu())
         all_labels.append(ged_labels.cpu())
 
-        pairs.extend(list(zip(idx1, idx2, predicted_ged.cpu())))
-    t1 = time()
+        distance_matrix[idx1, idx2] = predicted_ged.cpu()
+
+        # pairs.extend(list(zip(idx1, idx2, predicted_ged.cpu())))
+    
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
@@ -83,12 +85,14 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
     print(f"[Test] RMSE: {rmse:.4f}")
 
-    clean_pairs = [(i.item(), j.item(), ged.item()) for i, j, ged in pairs]
+    # clean_pairs = [(i.item(), j.item(), ged.item()) for i, j, ged in pairs]
 
-    return clean_pairs
+    distance_matrix += distance_matrix.T
+
+    return distance_matrix
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=101):
+def train_triplet_encoder(loader, encoder, device, epochs=201):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     critertion = TripletLoss(margin=0.4)
@@ -226,7 +230,7 @@ def main():
 
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
-    test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
+    test_loader = DataLoader(siamese_test, batch_size=512, shuffle=False)
 
     # Model
     embedding_dim = 64
@@ -245,7 +249,9 @@ def main():
 
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    # test_preds = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+    distance_matrix = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+
+    knn_classifier(distance_matrix, train_data_indices, test_data_indices)
     
 
 if __name__ == '__main__':

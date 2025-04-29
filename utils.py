@@ -9,6 +9,12 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from itertools import combinations
 
+from torch_geometric.datasets import TUDataset
+
+from sklearn.metrics import f1_score
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+
 
 def compute_cost_matrix(representations1, representations2):
     return torch.cdist(representations1, representations2, p=2)
@@ -91,6 +97,56 @@ def plot_ged(test_preds, distance_matrix, test_data_indices, train_data_indices)
     ax.spines[['right', 'top']].set_visible(False)
     plt.tight_layout()
     plt.show()
+
+
+def knn_classifier(distance_matrix, train_idx, test_idx):
+
+    train_distance_matrix = distance_matrix[train_idx,:]
+    train_distance_matrix = train_distance_matrix[:, train_idx]
+    np.fill_diagonal(train_distance_matrix, 1000)
+
+    test_distance_matrix = distance_matrix[test_idx,:]
+    test_distance_matrix = test_distance_matrix[:,train_idx]
+
+    dataset = TUDataset(root='data', name='MUTAG')
+    
+    train_labels = list(dataset[train_idx].y.numpy())
+    test_labels = list(dataset[test_idx].y.numpy())
+
+    scoring = 'f1'
+
+    ks = (3, 5, 7, 9, 11)
+    best_k = None
+    best_score = 0
+
+    kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    for k in ks:
+        knn = KNeighborsClassifier(n_neighbors=k, metric='precomputed')
+        scores = cross_val_score(knn, 
+                                 train_distance_matrix,
+                                 train_labels,
+                                 cv=kf,
+                                 scoring=scoring)
+        
+        mean_score = scores.mean()
+
+        if mean_score > best_score:
+            best_score = mean_score
+            best_k = k
+
+    # retrain on the test data with the best k
+    knn_test = KNeighborsClassifier(n_neighbors=best_k, metric='precomputed')
+    
+    knn_test.fit(train_distance_matrix, train_labels)
+
+    predictions = knn_test.predict(test_distance_matrix)
+
+    f1 = f1_score(test_labels, predictions, average='binary')
+
+    # print(f"F1 Score on new data with K={best_k}: {f1}")
+    print(f'The optimal number of K-nearest neighbors is {best_k} with a mean F1 score of {best_score}\n')
+    print(f'F1 Score on new data with K={best_k}: {f1}\n')
 
 
 def get_ged_labels(distance_matrix):

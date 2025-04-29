@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from itertools import product
+from itertools import product, combinations
 
 from torch.utils.data import Dataset
 
@@ -92,7 +92,8 @@ class SiameseTestDataset(Dataset):
         self.ged_labels = ged_labels
 
         # Generate all (test_idx, train_idx) pairs
-        self.pairs = list(product(test_indices, train_indices)) # deterministic and exhaustive pairs
+        # self.pairs = list(product(test_indices, train_indices)) # deterministic and exhaustive pairs
+        self.pairs = list(combinations(range(len(train_indices)+len(test_indices)), r=2))
     
     def _get_ged(self, i, j):
         return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
