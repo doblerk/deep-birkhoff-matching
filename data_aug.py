@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 
+from itertools import product
+
 from torch.utils.data import Dataset
 
 
@@ -69,7 +71,7 @@ class SiameseDataset(Dataset):
         # Graphs in batch1 are <= graphs in batch2
         graph1, graph2 = (
             (self.graphs[idx1], self.graphs[idx2]) 
-            if self.graphs[idx].num_nodes <= self.graphs[idx2].num_nodes
+            if self.graphs[idx1].num_nodes <= self.graphs[idx2].num_nodes
             else (self.graphs[idx2], self.graphs[idx1]) 
         )
 
@@ -78,3 +80,36 @@ class SiameseDataset(Dataset):
         normalized_ged_value = ged_value / ( 0.5 * (graph1.num_nodes + graph2.num_nodes) )
 
         return graph1, graph2, torch.tensor(normalized_ged_value, dtype=torch.float)
+
+
+class SiameseTestDataset(Dataset):
+
+    def __init__(self, graphs, train_indices, test_indices, ged_labels):
+        super(SiameseTestDataset, self).__init__()
+        self.graphs = graphs
+        self.train_indices = train_indices
+        self.test_indices = test_indices
+        self.ged_labels = ged_labels
+
+        # Generate all (test_idx, train_idx) pairs
+        self.pairs = list(product(test_indices, train_indices)) # deterministic and exhaustive pairs
+    
+    def _get_ged(self, i, j):
+        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        test_idx, train_idx = self.pairs[idx]
+        
+        graph1, graph2 = (
+            (self.graphs[test_idx], self.graphs[train_idx]) 
+            if self.graphs[test_idx].num_nodes <= self.graphs[train_idx].num_nodes
+            else (self.graphs[train_idx], self.graphs[test_idx]) 
+        )
+
+        ged_value = self._get_ged(test_idx, train_idx)
+        normalized_ged_value = ged_value / ( 0.5 * (graph1.num_nodes + graph2.num_nodes) )
+
+        return graph1, graph2, torch.tensor(normalized_ged_value, dtype=torch.float), test_idx, train_idx

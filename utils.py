@@ -74,6 +74,25 @@ def plot_attention(attention_weights, epoch, save_path="./res/attention_epoch_aw
     plt.close()
 
 
+def plot_ged(test_preds, distance_matrix, test_data_indices, train_data_indices):
+    test_pred_distance_matrix = [i[2] for i in test_preds]
+    pred_distances_normalized = ((test_pred_distance_matrix - np.min(test_pred_distance_matrix)) / (np.max(test_pred_distance_matrix) - np.min(test_pred_distance_matrix))).squeeze()
+
+    test_true_distance_matrix = distance_matrix[test_data_indices, :]
+    test_true_distance_matrix = test_true_distance_matrix[:, train_data_indices]
+    test_true_distance_matrix = test_true_distance_matrix.flatten(order='C').tolist()
+    true_distances_normalized = ((test_true_distance_matrix - np.min(test_true_distance_matrix)) / (np.max(test_true_distance_matrix) - np.min(test_true_distance_matrix))).squeeze()
+    
+    fig, ax = plt.subplots(figsize=(8,8))
+    ax.scatter(true_distances_normalized, pred_distances_normalized, s=26, alpha=0.75, edgecolor='lightgrey', c='grey', linewidth=0.5)
+    ax.plot(true_distances_normalized, true_distances_normalized, linestyle='-', linewidth=1, color='black')
+    ax.set_xlabel('BP-GED', fontsize=22)
+    ax.set_ylabel('GNN-GED', fontsize=22)
+    ax.spines[['right', 'top']].set_visible(False)
+    plt.tight_layout()
+    plt.show()
+
+
 def get_ged_labels(distance_matrix):
     num_graphs = len(distance_matrix)
     graph_pairs = combinations(range(num_graphs), r=2)

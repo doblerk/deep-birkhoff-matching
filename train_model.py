@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-
+from time import time
 import torch.nn.functional as F
 
 from torch.utils.data import random_split
@@ -15,11 +15,11 @@ from utils import get_ged_labels, \
                   get_node_masks, \
                   generate_attention_masks, \
                   get_cost_matrices_distr, \
-                  visualize_node_embeddings, plot_attention
+                  visualize_node_embeddings, plot_attention, plot_ged
 
 from model import Model
 
-from data_aug import TripletDataset, SiameseDataset
+from data_aug import TripletDataset, SiameseDataset, SiameseTestDataset
 
 from diff_birkhoff import PermutationPool, \
                           AlphaPermutationLayer, \
@@ -38,9 +38,11 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
     all_preds = []
     all_labels = []
 
+    pairs = []
+    t0 = time()
     for batch in loader:
 
-        batch1, batch2, ged_labels = batch
+        batch1, batch2, ged_labels, idx1, idx2 = batch
         batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
 
         n_nodes_1 = batch1.batch.bincount()
@@ -63,12 +65,17 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
         soft_assignments = soft_assignments * assignment_mask
 
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
+
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
 
         all_preds.append(normalized_predicted_ged.cpu())
         all_labels.append(ged_labels.cpu())
 
+        pairs.extend(list(zip(idx1, idx2, predicted_ged.cpu())))
+    t1 = time()
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
@@ -76,8 +83,12 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
     print(f"[Test] RMSE: {rmse:.4f}")
 
+    clean_pairs = [(i.item(), j.item(), ged.item()) for i, j, ged in pairs]
 
-def train_triplet_encoder(loader, encoder, device, epochs=201):
+    return clean_pairs
+
+
+def train_triplet_encoder(loader, encoder, device, epochs=101):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     critertion = TripletLoss(margin=0.4)
@@ -117,7 +128,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=201):
     return encoder
 
 
-def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
+def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=301):
     encoder.eval()
     alpha_layer.train()
 
@@ -166,6 +177,10 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
 
             soft_assignments = soft_assignments * assignment_mask
 
+            # Renormalize only the unmasked rows to restor per-row stochasticity
+            row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+            soft_assignments = soft_assignments / row_sums
+
             predicted_ged = criterion(padded_cost_matrices, soft_assignments) # (B,)
             normalized_predicted_ged = predicted_ged / normalization_factor
 
@@ -181,7 +196,7 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
         
         if epoch % 10 == 0:
             print(f"[GED] Epoch {epoch+1}/{epochs} - MSE: {average_loss:.4f} - RMSE: {np.sqrt(average_loss):.1f}")
-
+            
 
 def main():
 
@@ -202,11 +217,12 @@ def main():
 
     generator = torch.Generator().manual_seed(42)
     train_data, test_data = random_split(dataset, [train_len, test_len], generator=generator)
+    train_data_indices, test_data_indices = sorted(train_data.indices), sorted(test_data.indices)
 
     # Prepare DataLoader
-    triplet_train = TripletDataset(dataset, train_data.indices, ged_labels)
-    siamese_train = SiameseDataset(dataset, train_data.indices, ged_labels)
-    siamese_test = SiameseDataset(dataset, test_data.indices, ged_labels)
+    triplet_train = TripletDataset(dataset, train_data_indices, ged_labels)
+    siamese_train = SiameseDataset(dataset, train_data_indices, ged_labels)
+    siamese_test = SiameseTestDataset(dataset, train_data_indices, test_data_indices, ged_labels)
 
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
@@ -229,8 +245,8 @@ def main():
 
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
-
+    # test_preds = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+    
 
 if __name__ == '__main__':
     main()
