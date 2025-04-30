@@ -40,6 +40,8 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
     distance_matrix = np.zeros((188, 188), dtype=np.float32)
     
+    t0 = time()
+
     for batch in loader:
 
         batch1, batch2, ged_labels, idx1, idx2 = batch
@@ -78,12 +80,14 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
         # pairs.extend(list(zip(idx1, idx2, predicted_ged.cpu())))
     
+    t1 = time()
+
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
     rmse = np.sqrt(mse)
 
-    print(f"[Test] RMSE: {rmse:.4f}")
+    print(f"[Test] RMSE: {rmse:.4f} | Runtime computation {t1-t0} seconds")
 
     # clean_pairs = [(i.item(), j.item(), ged.item()) for i, j, ged in pairs]
 
@@ -230,7 +234,7 @@ def main():
 
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
-    test_loader = DataLoader(siamese_test, batch_size=512, shuffle=False)
+    test_loader = DataLoader(siamese_test, batch_size=1024, shuffle=False)
 
     # Model
     embedding_dim = 64
@@ -250,6 +254,8 @@ def main():
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
     distance_matrix = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+
+    print(distance_matrix)
 
     knn_classifier(distance_matrix, train_data_indices, test_data_indices)
     

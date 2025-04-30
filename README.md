@@ -20,6 +20,9 @@
 - We obtain soft assignment matrix (DSM), but we may convert it into a hard assignment matrix (permutation).
     - Take max values per row?
     - Take the permutation matrix with highest alpha?
+- The scale of the cost matrix can increase with the dimensionality of the node embeddings, especially with squared Euclidean distance. This can distort GED or alignment loss and make it harder to compare across models.
+    - One solution is to normalize node embeddings before computing cost and rescale cost using cosine distance.
+    - One solution is to normalize the cost by the dimensionality to cancel out the expected growth from higher dimensions.
 
 #### TODOs
 - [x] Implement a function to store ground truth labels as a dictionary -> constant lookup.
