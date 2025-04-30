@@ -120,18 +120,29 @@ class AlphaPermutationLayer(nn.Module):
         super(AlphaPermutationLayer, self).__init__()
         self.perm_pool = perm_pool
         self.k = perm_pool.k
-        self.temperature = 0.6
+        self.temperature = 0.8
 
+        # self.alpha_mlp = nn.Sequential(
+        #     nn.Linear(2 * embedding_dim, 128 * 4),
+        #     nn.ReLU(),
+        #     nn.Linear(128 * 4, self.k)
+        # )
+        dim = 128
         self.alpha_mlp = nn.Sequential(
-            nn.Linear(2 * embedding_dim, 128),
+            nn.Dropout(0.2),
+            nn.Linear(2 * embedding_dim, dim * 2),
             nn.ReLU(),
-            nn.Linear(128, self.k)
+            nn.LayerNorm(dim * 2),
+            nn.Dropout(0.2),
+            nn.Linear(dim * 2, 2 * embedding_dim),
+            nn.ReLU(),
+            nn.Linear(2 * embedding_dim, self.k)
         )
 
         # self.alpha_logits = nn.Parameter(torch.randn(max_batch_size, perm_pool.k), requires_grad=True)
     
     def get_alpha_weights(self):
-        return torch.softmax(self.alpha_logits / self.temperature, dim=0)
+        return torch.softmax(self.alpha_logits / self.temperature, dim=1)
         
     def forward(self, graph_repr_b1, graph_repr_b2):
         pair_repr = torch.cat([graph_repr_b1, graph_repr_b2], dim=1) # (B, 2D)

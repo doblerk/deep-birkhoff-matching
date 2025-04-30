@@ -67,8 +67,8 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
         soft_assignments = soft_assignments * assignment_mask
 
-        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        soft_assignments = soft_assignments / row_sums
+        # row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        # soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
@@ -82,14 +82,21 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
     
     t1 = time()
 
+    # import matplotlib.pyplot as plt
+    # n = 10
+    # fig, axs = plt.subplots(n, 2, figsize=(14,18))
+    # for i in range(n):
+    #     axs[i][0].imshow(padded_cost_matrices[i].detach().cpu().numpy())
+    #     axs[i][1].imshow(soft_assignments[i].detach().cpu().numpy())
+    # plt.tight_layout()
+    # plt.show()
+
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
     rmse = np.sqrt(mse)
 
     print(f"[Test] RMSE: {rmse:.4f} | Runtime computation {t1-t0} seconds")
-
-    # clean_pairs = [(i.item(), j.item(), ged.item()) for i, j, ged in pairs]
 
     distance_matrix += distance_matrix.T
 
@@ -99,7 +106,7 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
 def train_triplet_encoder(loader, encoder, device, epochs=201):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
-    critertion = TripletLoss(margin=0.4)
+    critertion = TripletLoss(margin=0.2)
 
     for epoch in range(epochs):
 
@@ -186,8 +193,8 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=301):
             soft_assignments = soft_assignments * assignment_mask
 
             # Renormalize only the unmasked rows to restor per-row stochasticity
-            row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-            soft_assignments = soft_assignments / row_sums
+            # row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+            # soft_assignments = soft_assignments / row_sums
 
             predicted_ged = criterion(padded_cost_matrices, soft_assignments) # (B,)
             normalized_predicted_ged = predicted_ged / normalization_factor
@@ -235,7 +242,7 @@ def main():
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
     test_loader = DataLoader(siamese_test, batch_size=1024, shuffle=False)
-
+    
     # Model
     embedding_dim = 64
     encoder = Model(dataset.num_features, embedding_dim, 3).to(device)
@@ -253,12 +260,9 @@ def main():
 
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    distance_matrix = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+    pred_geds = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
-    print(distance_matrix)
-
-    knn_classifier(distance_matrix, train_data_indices, test_data_indices)
-    
+    knn_classifier(pred_geds, train_data_indices, test_data_indices)
 
 if __name__ == '__main__':
     main()

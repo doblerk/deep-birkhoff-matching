@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from itertools import product, combinations
+from itertools import combinations
 
 from torch.utils.data import Dataset
 

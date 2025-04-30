@@ -21,40 +21,22 @@ def compute_cost_matrix(representations1, representations2):
 
 
 def compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2):
-    distance_matrices = []
     num_graphs = batch1.batch.max().item() + 1
-    dim = node_repr_b1.size(1)
-    node_repr_b1 = F.normalize(node_repr_b1, p=2, dim=1)
-    node_repr_b2 = F.normalize(node_repr_b2, p=2, dim=1)
-    for i in range(num_graphs):
-        nodes1 = node_repr_b1[batch1.batch == i]
-        nodes2 = node_repr_b2[batch2.batch == i]
-        # dist = torch.cdist(nodes1, nodes2, p=2) #** 2
-        # dist = dist / dim
-        dist = 1 - torch.matmul(nodes1, nodes2.T)
-        distance_matrices.append(dist)
+
+    # Precompute all distances (between all nodes)
+    all_dists = torch.cdist(node_repr_b1, node_repr_b2, p=2)  # [N1, N2]
+
+    # Build index lists for each graph
+    b1_indices = [((batch1.batch == i).nonzero(as_tuple=True)[0]) for i in range(num_graphs)]
+    b2_indices = [((batch2.batch == i).nonzero(as_tuple=True)[0]) for i in range(num_graphs)]
+    
+    # Gather relevant slices
+    distance_matrices = [
+        all_dists[idx1][:, idx2]
+        for idx1, idx2 in zip(b1_indices, b2_indices)
+    ]
+
     return distance_matrices
-    # num_graphs = batch1.batch.max().item() + 1
-    # device = node_repr_b1.device
-
-    # # if normalize:
-    #     # node_repr_b1 = F.normalize(node_repr_b1, p=2, dim=1)
-    #     # node_repr_b2 = F.normalize(node_repr_b2, p=2, dim=1)
-
-    # # Precompute all distances (between all nodes)
-    # all_dists = torch.cdist(node_repr_b1, node_repr_b2, p=2)  # [N1, N2]
-
-    # # Build index lists for each graph
-    # b1_indices = [((batch1.batch == i).nonzero(as_tuple=True)[0]) for i in range(num_graphs)]
-    # b2_indices = [((batch2.batch == i).nonzero(as_tuple=True)[0]) for i in range(num_graphs)]
-
-    # # Gather relevant slices
-    # distance_matrices = [
-    #     all_dists[idx1][:, idx2]
-    #     for idx1, idx2 in zip(b1_indices, b2_indices)
-    # ]
-
-    # return distance_matrices
 
 
 def pad_cost_matrices(cost_matrices, max_graph_size, pad_value=0.0):
@@ -170,9 +152,8 @@ def knn_classifier(distance_matrix, train_idx, test_idx):
 
     f1 = f1_score(test_labels, predictions, average='binary')
 
-    # print(f"F1 Score on new data with K={best_k}: {f1}")
-    print(f'The optimal number of K-nearest neighbors is {best_k} with a mean F1 score of {best_score}\n')
-    print(f'F1 Score on new data with K={best_k}: {f1}\n')
+    print(f'The optimal number of K-nearest neighbors is {best_k} with a mean F1 score of {best_score}')
+    print(f'F1 Score on new data with K={best_k}: {f1}')
 
 
 def get_ged_labels(distance_matrix):
