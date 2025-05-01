@@ -9,17 +9,19 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset
 
 from utils import get_ged_labels, \
+                  triplet_collate_fn, \
                   compute_cost_matrix, \
                   compute_graphwise_node_distances, \
                   pad_cost_matrices, \
                   get_node_masks, \
                   generate_attention_masks, \
-                  get_cost_matrices_distr, \
+                  get_cost_matrix_sizes, \
+                  get_sampled_cost_matrix_sizes, \
                   visualize_node_embeddings, plot_attention, plot_ged, knn_classifier
 
 from model import Model
 
-from data_aug import TripletDataset, SiameseDataset, SiameseTestDataset
+from data_aug import TripletDataset, SiameseDataset#, SiameseTestDataset, SiameseEvalDataset
 
 from diff_birkhoff import PermutationPool, \
                           AlphaPermutationLayer, \
@@ -29,7 +31,59 @@ from diff_birkhoff import PermutationPool, \
 
 
 @torch.no_grad()
-def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
+def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs):
+    encoder.eval()
+    alpha_layer.eval()
+
+    criterion = SoftGEDLoss()
+
+    distance_matrix = np.zeros((num_graphs, num_graphs), dtype=np.float32)
+    
+    t0 = time()
+
+    for batch in loader:
+
+        batch1, batch2, ged_labels, idx1, idx2 = batch
+        batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
+
+        # n_nodes_1 = batch1.batch.bincount()
+        # n_nodes_2 = batch2.batch.bincount()
+
+        # normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
+
+        node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
+        node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
+
+        cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
+        padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+
+        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+
+        row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
+        col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
+
+        assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
+
+        soft_assignments = soft_assignments * assignment_mask
+
+        # row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        # soft_assignments = soft_assignments / row_sums
+
+        predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        # normalized_predicted_ged = predicted_ged / normalization_factor
+
+        distance_matrix[idx1, idx2] = predicted_ged.cpu()
+    
+    t1 = time()
+    runtime = t1 - t0
+
+    distance_matrix += distance_matrix.T
+
+    return distance_matrix, runtime
+
+
+@torch.no_grad()
+def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
     encoder.eval()
     alpha_layer.eval()
 
@@ -38,13 +92,9 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
     all_preds = []
     all_labels = []
 
-    distance_matrix = np.zeros((188, 188), dtype=np.float32)
-    
-    t0 = time()
-
     for batch in loader:
 
-        batch1, batch2, ged_labels, idx1, idx2 = batch
+        batch1, batch2, ged_labels = batch
         batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
 
         n_nodes_1 = batch1.batch.bincount()
@@ -76,37 +126,18 @@ def evaluate_ged(loader, encoder, alpha_layer, device, max_graph_size):
         all_preds.append(normalized_predicted_ged.cpu())
         all_labels.append(ged_labels.cpu())
 
-        distance_matrix[idx1, idx2] = predicted_ged.cpu()
-
-        # pairs.extend(list(zip(idx1, idx2, predicted_ged.cpu())))
-    
-    t1 = time()
-
-    # import matplotlib.pyplot as plt
-    # n = 10
-    # fig, axs = plt.subplots(n, 2, figsize=(14,18))
-    # for i in range(n):
-    #     axs[i][0].imshow(padded_cost_matrices[i].detach().cpu().numpy())
-    #     axs[i][1].imshow(soft_assignments[i].detach().cpu().numpy())
-    # plt.tight_layout()
-    # plt.show()
-
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
     rmse = np.sqrt(mse)
 
-    print(f"[Test] RMSE: {rmse:.4f} | Runtime computation {t1-t0} seconds")
-
-    distance_matrix += distance_matrix.T
-
-    return distance_matrix
+    return rmse
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=201):
+def train_triplet_encoder(loader, encoder, device, epochs=11):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
-    critertion = TripletLoss(margin=0.2)
+    criterion = TripletLoss(margin=0.2)
 
     for epoch in range(epochs):
 
@@ -127,7 +158,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=201):
             _, p_graph_emb = encoder(p_batch.x, p_batch.edge_index, p_batch.batch)
             _, n_graph_emb = encoder(n_batch.x, n_batch.edge_index, n_batch.batch)
 
-            loss = critertion(a_graph_emb, p_graph_emb, n_graph_emb)
+            loss = criterion(a_graph_emb, p_graph_emb, n_graph_emb)
 
             loss.backward()
             optimizer.step()
@@ -143,7 +174,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=201):
     return encoder
 
 
-def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=301):
+def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=201):
     encoder.eval()
     alpha_layer.train()
 
@@ -215,15 +246,18 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=301):
 
 def main():
 
-    distance_matrix = np.load('./data/distances_alpha_-1.0.npy')
+    dataset_name = 'MUTAG'
+
+    distance_matrix = np.load(f'./res/{dataset_name}/distances_alpha_-1.0.npy')
 
     # Set device to CUDA
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Load the dataset from TUDataset
-    dataset = TUDataset(root='data', name='MUTAG')
+    dataset = TUDataset(root='data', name=dataset_name)
     ged_labels = get_ged_labels(distance_matrix)
-    sizes = get_cost_matrices_distr(dataset)
+    # sizes = get_cost_matrix_sizes(dataset)
+    sizes = get_sampled_cost_matrix_sizes(dataset)
 
     # Train/Test split
     total_len = len(dataset)
@@ -236,13 +270,16 @@ def main():
 
     # Prepare DataLoader
     triplet_train = TripletDataset(dataset, train_data_indices, ged_labels)
-    siamese_train = SiameseDataset(dataset, train_data_indices, ged_labels)
-    siamese_test = SiameseTestDataset(dataset, train_data_indices, test_data_indices, ged_labels)
+    siamese_train = SiameseDataset(dataset, ged_labels, pair_mode='train', train_indices=train_data_indices)
+    siamese_eval = SiameseDataset(dataset, ged_labels, pair_mode='all', train_indices=train_data_indices, test_indices=test_data_indices)
+    siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='cross', train_indices=train_data_indices, test_indices=test_data_indices)
 
-    triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
+    triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)#, collate_fn=triplet_collate_fn)
+    print(next(iter(triplet_loader)))
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
-    test_loader = DataLoader(siamese_test, batch_size=1024, shuffle=False)
-    
+    eval_loader = DataLoader(siamese_eval, batch_size=64, shuffle=False)
+    test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
+
     # Model
     embedding_dim = 64
     encoder = Model(dataset.num_features, embedding_dim, 3).to(device)
@@ -250,19 +287,28 @@ def main():
     encoder = train_triplet_encoder(triplet_loader, encoder, device)
     encoder.freeze_params(encoder) # you should not only freeze, but checkpoint the model as well
 
-    max_graph_size = max([g.num_nodes for g in dataset])
-    k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 51
+    # max_graph_size = max([g.num_nodes for g in dataset])
+    # k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
+    # k = 51
 
-    perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
+    # perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
-    alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim).to(device)
+    # alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim).to(device)
 
-    train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
+    # train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    pred_geds = evaluate_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+    # pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
+    
+    # rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
-    knn_classifier(pred_geds, train_data_indices, test_data_indices)
+    # knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
+
+    # with open(f'./res/{dataset.name}/rmse_loss.txt', 'a') as file:
+    #     file.write(f'Test RMSE: {rmse}\n')
+    
+    # with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
+    #     file.write(f'Runtime computation {runtime:.4f} seconds\n')
+
 
 if __name__ == '__main__':
     main()

@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 
 import torch
@@ -9,11 +11,20 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from itertools import combinations
 
+from torch_geometric.data import Batch
 from torch_geometric.datasets import TUDataset
 
 from sklearn.metrics import f1_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
+
+
+def triplet_collate_fn(batch):
+    anchors, positives, negatives = zip(*batch)
+    anchor_batch = Batch.from_data_list(anchors)
+    pos_batch = Batch.from_data_list(positives)
+    neg_batch = Batch.from_data_list(negatives)
+    return anchor_batch, pos_batch, neg_batch
 
 
 def compute_cost_matrix(representations1, representations2):
@@ -107,7 +118,7 @@ def plot_ged(test_preds, distance_matrix, test_data_indices, train_data_indices)
     plt.show()
 
 
-def knn_classifier(distance_matrix, train_idx, test_idx):
+def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):
 
     train_distance_matrix = distance_matrix[train_idx,:]
     train_distance_matrix = train_distance_matrix[:, train_idx]
@@ -116,12 +127,12 @@ def knn_classifier(distance_matrix, train_idx, test_idx):
     test_distance_matrix = distance_matrix[test_idx,:]
     test_distance_matrix = test_distance_matrix[:,train_idx]
 
-    dataset = TUDataset(root='data', name='MUTAG')
+    dataset = TUDataset(root='data', name=dataset_name)
     
     train_labels = list(dataset[train_idx].y.numpy())
     test_labels = list(dataset[test_idx].y.numpy())
 
-    scoring = 'f1'
+    scoring = 'f1_micro'
 
     ks = (3, 5, 7, 9, 11)
     best_k = None
@@ -150,10 +161,12 @@ def knn_classifier(distance_matrix, train_idx, test_idx):
 
     predictions = knn_test.predict(test_distance_matrix)
 
-    f1 = f1_score(test_labels, predictions, average='binary')
+    f1 = f1_score(test_labels, predictions, average='micro')
 
-    print(f'The optimal number of K-nearest neighbors is {best_k} with a mean F1 score of {best_score}')
-    print(f'F1 Score on new data with K={best_k}: {f1}')
+    with open(f'./res/{dataset_name}/classification_accuracy.txt', 'a') as file:
+        file.write(f'The optimal number of K-nearest neighbors is {best_k} with a mean F1 score of {best_score}\n')
+        file.write(f'F1 Score on new data with K={best_k}: {f1}\n')
+        file.write('\n')
 
 
 def get_ged_labels(distance_matrix):
@@ -165,16 +178,25 @@ def get_ged_labels(distance_matrix):
     return ged_labels
 
 
-def get_cost_matrices_distr(dataset):
+def get_cost_matrix_sizes(dataset):
     sizes = []
     for i, j in combinations(range(len(dataset)), r=2):
         g1, g2 = dataset[i], dataset[j]
-        if g1.num_nodes <= g2.num_nodes:
-            sizes.append((g1.num_nodes, g2.num_nodes))
-        else:
-            sizes.append((g2.num_nodes, g1.num_nodes))
-    sizes = np.array(sizes)
-    return sizes
+        small, large = sorted([g1.num_nodes, g2.num_nodes])
+        sizes.append((small, large))
+    return np.array(sizes)
+
+
+def get_sampled_cost_matrix_sizes(dataset, num_samples=10000, seed=42):
+    random.seed(seed)
+    n = len(dataset)
+    sizes = []
+    for _ in range(num_samples):
+        i, j = random.sample(range(n), 2)
+        g1, g2 = dataset[i], dataset[j]
+        small, large = sorted([g1.num_nodes, g2.num_nodes])
+        sizes.append((small, large))
+    return np.array(sizes)
 
 
 def visualize_node_embeddings(model, data):
