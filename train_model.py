@@ -103,7 +103,7 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
     all_preds = []
     all_labels = []
-    b = 0
+
     for batch in loader:
 
         batch1, batch2, ged_labels = batch
@@ -138,6 +138,16 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
         all_preds.append(normalized_predicted_ged.cpu())
         all_labels.append(ged_labels.cpu())
 
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        fig, axs = plt.subplots(1, 2, figsize=(16,8))
+        sns.heatmap(padded_cost_matrices[1][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[0])
+        sns.heatmap(soft_assignments[1][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[1])
+        plt.tight_layout()
+        plt.savefig('./res/MUTAG/graph2_vs_graph1_no_mlp.png', dpi=600, format='png')
+
+        plot_assignments(2, 1, soft_assignments[1].detach().cpu().numpy())
+        break
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
@@ -189,7 +199,6 @@ def train_triplet_encoder(loader, encoder, device, epochs=501):
 def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
     encoder.eval()
     alpha_layer.train()
-    # attention_layer.train()
 
     optimizer = torch.optim.Adam(
         list(alpha_layer.parameters()),
@@ -291,7 +300,7 @@ def main():
     siamese_eval = SiameseDataset(dataset, ged_labels, pair_mode='all', train_indices=train_data_indices, test_indices=test_data_indices)
     siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='cross', train_indices=train_data_indices, test_indices=test_data_indices)
 
-    triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)#, collate_fn=triplet_collate_fn)
+    triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
     eval_loader = DataLoader(siamese_eval, batch_size=64, shuffle=False)
     test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
@@ -305,29 +314,25 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 51
+    k = 101
 
     perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
-    perm_pool_batch = perm_pool.get_matrix_batch()
-
-    a = torch.sum(perm_pool_batch, dim=0)
-
-    alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim).to(device)
+    alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim, 64).to(device)
 
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
+    # pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
     
     rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
-    knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
+    # knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
 
-    with open(f'./res/{dataset.name}/rmse_loss.txt', 'a') as file:
-        file.write(f'Test RMSE: {rmse}\n')
+    # with open(f'./res/{dataset.name}/rmse_loss.txt', 'a') as file:
+    #     file.write(f'Test RMSE: {rmse}\n')
     
-    with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
-        file.write(f'Runtime computation {runtime:.4f} seconds\n')
+    # with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
+    #     file.write(f'Runtime computation {runtime:.4f} seconds\n')
 
 
 if __name__ == '__main__':

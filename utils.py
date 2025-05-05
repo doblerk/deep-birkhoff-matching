@@ -148,12 +148,13 @@ def plot_assignments(idx1, idx2, soft_assignment):
     for i in range(len(G1.nodes)):
         for j in range(len(G2.nodes)):
             weight = soft_assignment[i, j]
-            x_vals = [pos1[i][0], pos2[j][0]]
-            y_vals = [pos1[i][1], pos2[j][1]]
-            ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
+            if weight >= 0.1:
+                x_vals = [pos1[i][0], pos2[j][0]]
+                y_vals = [pos1[i][1], pos2[j][1]]
+                ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
 
     plt.axis('off')
-    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_graph_classification.png', dpi=1000)
+    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_no_mlp.png', dpi=1000)
 
 
 def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):
