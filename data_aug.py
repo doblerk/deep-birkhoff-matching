@@ -91,7 +91,7 @@ class SiameseDataset(Dataset):
     def __getitem__(self, idx):
         if self.pair_mode == 'train':
             idx1 = self.train_indices[idx]
-            idx2 = np.random.choice(self.train_indices)
+            idx2 = int(np.random.choice(self.train_indices))
         else:
             idx1, idx2 = self.pairs[idx]
         
@@ -102,107 +102,9 @@ class SiameseDataset(Dataset):
             g1, g2 = g2, g1
         
         ged = self._get_ged(idx1, idx2)
-        normalized_ged = ged / (0.5 * (g1.num_nodes + g2.num_nodes))
+        normalized_ged =  ged / (0.5 * (g1.num_nodes + g2.num_nodes))
 
         if self.pair_mode == 'all':
             return g1, g2, torch.tensor(normalized_ged, dtype=torch.float), idx1, idx2
         else:
             return g1, g2, torch.tensor(normalized_ged, dtype=torch.float)
-
-
-
-# class SiameseDataset(Dataset):
-
-#     def __init__(self, graphs, indices, ged_labels):
-#         super(SiameseDataset, self).__init__()
-#         self.graphs = graphs
-#         self.indices = indices
-#         self.ged_labels = ged_labels # dictionnary mapping of "ground truth" ged -> constant lookup
-    
-#     def _get_ged(self, i, j):
-#         return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
-
-#     def __len__(self):
-#         return len(self.indices)
-
-#     def __getitem__(self, idx):
-#         # Remap idx to the correct index in graphs
-#         idx1 = self.indices[idx]
-
-#         # Randomly sample a new idx
-#         idx2 = np.random.choice(self.indices)
-
-#         # Graphs in batch1 are <= graphs in batch2
-#         graph1, graph2 = (
-#             (self.graphs[idx1], self.graphs[idx2]) 
-#             if self.graphs[idx1].num_nodes <= self.graphs[idx2].num_nodes
-#             else (self.graphs[idx2], self.graphs[idx1]) 
-#         )
-
-#         # Retrieve ground truth GED for this pair
-#         ged_value = self._get_ged(idx1, idx2)
-#         normalized_ged_value = ged_value / ( 0.5 * (graph1.num_nodes + graph2.num_nodes) )
-
-#         return graph1, graph2, torch.tensor(normalized_ged_value, dtype=torch.float)
-
-
-# class SiameseTestDataset(Dataset):
-
-#     def __init__(self, graphs, train_indices, test_indices, ged_labels):
-#         super(SiameseTestDataset, self).__init__()
-#         self.graphs = graphs
-#         self.train_indices = train_indices
-#         self.test_indices = test_indices
-#         self.ged_labels = ged_labels
-#         self.pairs = list(product(test_indices, train_indices))
-    
-#     def _get_ged(self, i, j):
-#         return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
-
-#     def __len__(self):
-#         return len(self.pairs)
-
-#     def __getitem__(self, idx):
-#         test_idx, train_idx = self.pairs[idx]
-        
-#         graph1, graph2 = (
-#             (self.graphs[test_idx], self.graphs[train_idx]) 
-#             if self.graphs[test_idx].num_nodes <= self.graphs[train_idx].num_nodes
-#             else (self.graphs[train_idx], self.graphs[test_idx]) 
-#         )
-
-#         ged_value = self._get_ged(test_idx, train_idx)
-#         normalized_ged_value = ged_value / ( 0.5 * (graph1.num_nodes + graph2.num_nodes) )
-
-#         return graph1, graph2, torch.tensor(normalized_ged_value, dtype=torch.float)
-
-
-# class SiameseEvalDataset(Dataset):
-
-#     def __init__(self, graphs, train_indices, test_indices, ged_labels):
-#         super(SiameseEvalDataset, self).__init__()
-#         self.graphs = graphs
-#         self.train_indices = train_indices
-#         self.test_indices = test_indices
-#         self.ged_labels = ged_labels
-#         self.pairs = list(combinations(range(len(train_indices)+len(test_indices)), r=2))
-    
-#     def _get_ged(self, i, j):
-#         return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
-
-#     def __len__(self):
-#         return len(self.pairs)
-
-#     def __getitem__(self, idx):
-#         test_idx, train_idx = self.pairs[idx]
-        
-#         graph1, graph2 = (
-#             (self.graphs[test_idx], self.graphs[train_idx]) 
-#             if self.graphs[test_idx].num_nodes <= self.graphs[train_idx].num_nodes
-#             else (self.graphs[train_idx], self.graphs[test_idx]) 
-#         )
-
-#         ged_value = self._get_ged(test_idx, train_idx)
-#         normalized_ged_value = ged_value / ( 0.5 * (graph1.num_nodes + graph2.num_nodes) )
-
-#         return graph1, graph2, torch.tensor(normalized_ged_value, dtype=torch.float), test_idx, train_idx

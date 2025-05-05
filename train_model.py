@@ -4,7 +4,6 @@ from time import time
 import torch.nn.functional as F
 
 from torch.utils.data import random_split
-from torch_geometric.utils import to_dense_batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset
 
@@ -17,7 +16,7 @@ from utils import get_ged_labels, \
                   generate_attention_masks, \
                   get_cost_matrix_sizes, \
                   get_sampled_cost_matrix_sizes, \
-                  visualize_node_embeddings, plot_attention, plot_ged, knn_classifier
+                  visualize_node_embeddings, plot_attention, plot_ged, knn_classifier, plot_assignments
 
 from model import Model
 
@@ -66,11 +65,24 @@ def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs
 
         soft_assignments = soft_assignments * assignment_mask
 
-        # row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        # soft_assignments = soft_assignments / row_sums
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         # normalized_predicted_ged = predicted_ged / normalization_factor
+
+        # n = 5
+        # import matplotlib.pyplot as plt
+
+        # fig, axs = plt.subplots(n, 2, figsize=(16, 20))
+        # for i in range(n):
+        #     axs[i][0].imshow(padded_cost_matrices[i].detach().cpu().numpy())
+        #     axs[i][1].imshow(soft_assignments[i].detach().cpu().numpy())
+        
+        # plt.tight_layout()
+        # # plt.savefig(f'./res/MUTAG/fig_{n}_2.eps', dpi=500, format='eps')
+        # plt.show()
+        # break
 
         distance_matrix[idx1, idx2] = predicted_ged.cpu()
     
@@ -91,7 +103,7 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
     all_preds = []
     all_labels = []
-
+    b = 0
     for batch in loader:
 
         batch1, batch2, ged_labels = batch
@@ -117,8 +129,8 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
 
         soft_assignments = soft_assignments * assignment_mask
 
-        # row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        # soft_assignments = soft_assignments / row_sums
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
@@ -134,7 +146,7 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
     return rmse
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=11):
+def train_triplet_encoder(loader, encoder, device, epochs=501):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -174,9 +186,10 @@ def train_triplet_encoder(loader, encoder, device, epochs=11):
     return encoder
 
 
-def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=201):
+def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
     encoder.eval()
     alpha_layer.train()
+    # attention_layer.train()
 
     optimizer = torch.optim.Adam(
         list(alpha_layer.parameters()),
@@ -212,9 +225,13 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=201):
 
             padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
+            # Apply learnable attention before masking
+            # attention_cost_matrices = attention_layer(padded_cost_matrices)
+
             # Soft assignment via learnable alpha-weighted permutation matrices
             soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
+            # Mask padded regions
             row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
             col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
 
@@ -275,7 +292,6 @@ def main():
     siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='cross', train_indices=train_data_indices, test_indices=test_data_indices)
 
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)#, collate_fn=triplet_collate_fn)
-    print(next(iter(triplet_loader)))
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
     eval_loader = DataLoader(siamese_eval, batch_size=64, shuffle=False)
     test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
@@ -287,27 +303,31 @@ def main():
     encoder = train_triplet_encoder(triplet_loader, encoder, device)
     encoder.freeze_params(encoder) # you should not only freeze, but checkpoint the model as well
 
-    # max_graph_size = max([g.num_nodes for g in dataset])
-    # k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    # k = 51
+    max_graph_size = max([g.num_nodes for g in dataset])
+    k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
+    k = 51
 
-    # perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
+    perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
-    # alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim).to(device)
+    perm_pool_batch = perm_pool.get_matrix_batch()
 
-    # train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
+    a = torch.sum(perm_pool_batch, dim=0)
 
-    # pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
+    alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim).to(device)
+
+    train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
+
+    pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
     
-    # rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+    rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
-    # knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
+    knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
 
-    # with open(f'./res/{dataset.name}/rmse_loss.txt', 'a') as file:
-    #     file.write(f'Test RMSE: {rmse}\n')
+    with open(f'./res/{dataset.name}/rmse_loss.txt', 'a') as file:
+        file.write(f'Test RMSE: {rmse}\n')
     
-    # with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
-    #     file.write(f'Runtime computation {runtime:.4f} seconds\n')
+    with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
+        file.write(f'Runtime computation {runtime:.4f} seconds\n')
 
 
 if __name__ == '__main__':

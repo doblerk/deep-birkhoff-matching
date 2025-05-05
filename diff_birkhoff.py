@@ -122,11 +122,6 @@ class AlphaPermutationLayer(nn.Module):
         self.k = perm_pool.k
         self.temperature = 0.8
 
-        # self.alpha_mlp = nn.Sequential(
-        #     nn.Linear(2 * embedding_dim, 128 * 4),
-        #     nn.ReLU(),
-        #     nn.Linear(128 * 4, self.k)
-        # )
         dim = 128
         self.alpha_mlp = nn.Sequential(
             nn.Dropout(0.2),
@@ -158,10 +153,10 @@ class LearnablePaddingAttention(nn.Module):
     def __init__(self, max_graph_size):
         super(LearnablePaddingAttention, self).__init__()
         self.max_graph_size = max_graph_size
-        self.attention_weights = nn.Parameter(torch.randn(max_graph_size, max_graph_size))
+        self.attention_logits = nn.Parameter(torch.randn(max_graph_size, max_graph_size))
     
-    def forward(self, cost_matrices, masks):
-        attention_mask = torch.sigmoid(self.attention_weights)
-        attention_mask = attention_mask.unsqueeze(0)
-        masked_cost_matrix = cost_matrices * attention_mask
-        return masked_cost_matrix * masks
+    def forward(self, cost_matrices):
+        attention_weights = torch.sigmoid(self.attention_logits)
+        attention_weights = attention_weights.unsqueeze(0).to(cost_matrices.device)
+        # weighted_cost = cost_matrices * attention_weights
+        return cost_matrices * attention_weights

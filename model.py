@@ -64,6 +64,14 @@ class Model(torch.nn.Module):
                                 
         for _ in range(n_layers - 1):
             self.conv_layers.append(GINLayer(hidden_dim, hidden_dim))
+        
+        self.dense_layers = Sequential(
+            Linear(hidden_dim * n_layers, hidden_dim * n_layers),
+            BatchNorm1d(hidden_dim * n_layers),
+            ReLU(),
+            Dropout(p=0.2),
+            Linear(hidden_dim * n_layers, hidden_dim)
+        )
 
         self.input_proj = Linear(input_dim, hidden_dim) if input_dim != hidden_dim else None
     
@@ -73,8 +81,21 @@ class Model(torch.nn.Module):
     
     def forward(self, x, edge_index, batch):
         x_residual = self.input_proj(x) if self.input_proj is not None else x
+
+        node_embeddings = []
         for layer in self.conv_layers:
             x = layer(x, edge_index)
             x = x + x_residual
             x_residual = x
-        return x, global_add_pool(x, batch)
+            node_embeddings.append(x)
+        
+        graph_pooled = []
+        for embeddings in node_embeddings:
+            pooled = global_add_pool(embeddings, batch)
+            graph_pooled.append(pooled)
+        
+        h = torch.cat(graph_pooled, dim=1)
+
+        graph_embeddings = self.dense_layers(h)
+
+        return node_embeddings[-1], graph_embeddings #x, global_add_pool(x, batch)

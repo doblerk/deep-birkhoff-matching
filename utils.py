@@ -2,6 +2,8 @@ import random
 
 import numpy as np
 
+import networkx as nx
+
 import torch
 import torch.nn.functional as F
 
@@ -12,6 +14,7 @@ from sklearn.manifold import TSNE
 from itertools import combinations
 
 from torch_geometric.data import Batch
+from torch_geometric.utils import to_networkx
 from torch_geometric.datasets import TUDataset
 
 from sklearn.metrics import f1_score
@@ -70,9 +73,9 @@ def get_node_masks(batch, max_size):
     counts = batch.batch.bincount()
     B = counts.size(0)
 
-    masks = torch.zeros(B, max_size, device=device)
+    masks = torch.zeros(B, max_size, device=device, dtype=torch.bool)
     for i, count in enumerate(counts):
-        masks[i, :count] = 1
+        masks[i, :count] = True
     return masks
 
 
@@ -116,6 +119,41 @@ def plot_ged(test_preds, distance_matrix, test_data_indices, train_data_indices)
     ax.spines[['right', 'top']].set_visible(False)
     plt.tight_layout()
     plt.show()
+
+
+def plot_assignments(idx1, idx2, soft_assignment):
+    dataset = TUDataset(root='data', name='MUTAG')
+    g1 = dataset[idx1]
+    g2 = dataset[idx2]
+    
+    G1 = to_networkx(g1, to_undirected=True)
+    G2 = to_networkx(g2, to_undirected=True)
+
+    node_labels1 = g1.x.argmax(dim=1).numpy()  # tensor -> class indices
+    node_labels2 = g2.x.argmax(dim=1).numpy()
+
+    pos1 = nx.kamada_kawai_layout(G1)  # positions for nodes in G1
+    pos2 = nx.kamada_kawai_layout(G2)  # positions for nodes in G2
+
+    # Optionally, offset pos2 so the two graphs don't overlap
+    for key in pos2:
+        pos2[key][0] += 3                                              
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    nx.draw(G1, pos=pos1, ax=ax, node_color=node_labels1, cmap=plt.cm.tab10, edge_color='gray', with_labels=True)
+    nx.draw(G2, pos=pos2, ax=ax, node_color=node_labels2, cmap=plt.cm.tab10, edge_color='gray', with_labels=True)
+
+    # Overlay soft assignments as weighted edges
+    for i in range(len(G1.nodes)):
+        for j in range(len(G2.nodes)):
+            weight = soft_assignment[i, j]
+            x_vals = [pos1[i][0], pos2[j][0]]
+            y_vals = [pos1[i][1], pos2[j][1]]
+            ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
+
+    plt.axis('off')
+    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_graph_classification.png', dpi=1000)
 
 
 def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):
