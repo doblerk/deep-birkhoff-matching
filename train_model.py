@@ -40,7 +40,7 @@ def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs
     
     t0 = time()
 
-    for batch in loader:
+    for idx, batch in enumerate(loader):
 
         batch1, batch2, ged_labels, idx1, idx2 = batch
         batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
@@ -56,7 +56,7 @@ def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs
         cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
-        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        soft_assignments, alphas = alpha_layer(graph_repr_b1)
 
         row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
         col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
@@ -71,18 +71,17 @@ def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         # normalized_predicted_ged = predicted_ged / normalization_factor
 
-        # n = 5
-        # import matplotlib.pyplot as plt
+        # if idx == 2:
+        #     import matplotlib.pyplot as plt
+        #     import seaborn as sns
+        #     fig, axs = plt.subplots(1, 2, figsize=(16,8))
+        #     sns.heatmap(padded_cost_matrices[59][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[0])
+        #     sns.heatmap(soft_assignments[59][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[1])
+        #     plt.tight_layout()
+        #     plt.savefig('./res/MUTAG/graph2_vs_graph1_no_mlp_TEST.png', dpi=600, format='png')
 
-        # fig, axs = plt.subplots(n, 2, figsize=(16, 20))
-        # for i in range(n):
-        #     axs[i][0].imshow(padded_cost_matrices[i].detach().cpu().numpy())
-        #     axs[i][1].imshow(soft_assignments[i].detach().cpu().numpy())
-        
-        # plt.tight_layout()
-        # # plt.savefig(f'./res/MUTAG/fig_{n}_2.eps', dpi=500, format='eps')
-        # plt.show()
-        # break
+        #     plot_assignments(2, 1, soft_assignments[59].detach().cpu().numpy())
+        #     break
 
         distance_matrix[idx1, idx2] = predicted_ged.cpu()
     
@@ -120,7 +119,7 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
         cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
-        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        soft_assignments, alphas = alpha_layer(graph_repr_b1)
 
         row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
         col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
@@ -138,16 +137,6 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
         all_preds.append(normalized_predicted_ged.cpu())
         all_labels.append(ged_labels.cpu())
 
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        fig, axs = plt.subplots(1, 2, figsize=(16,8))
-        sns.heatmap(padded_cost_matrices[1][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[0])
-        sns.heatmap(soft_assignments[1][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[1])
-        plt.tight_layout()
-        plt.savefig('./res/MUTAG/graph2_vs_graph1_no_mlp.png', dpi=600, format='png')
-
-        plot_assignments(2, 1, soft_assignments[1].detach().cpu().numpy())
-        break
     preds = torch.cat(all_preds).numpy()
     labels = torch.cat(all_labels).numpy()
     mse = np.mean((preds - labels) ** 2)
@@ -156,7 +145,7 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
     return rmse
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=501):
+def train_triplet_encoder(loader, encoder, device, epochs=1):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -196,7 +185,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=501):
     return encoder
 
 
-def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
+def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=1):
     encoder.eval()
     alpha_layer.train()
 
@@ -234,12 +223,9 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
 
             padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
-            # Apply learnable attention before masking
-            # attention_cost_matrices = attention_layer(padded_cost_matrices)
-
             # Soft assignment via learnable alpha-weighted permutation matrices
-            soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
-
+            soft_assignments, alphas = alpha_layer(graph_repr_b1)
+            
             # Mask padded regions
             row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
             col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
@@ -248,10 +234,6 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
             assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 
             soft_assignments = soft_assignments * assignment_mask
-
-            # Renormalize only the unmasked rows to restor per-row stochasticity
-            # row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-            # soft_assignments = soft_assignments / row_sums
 
             predicted_ged = criterion(padded_cost_matrices, soft_assignments) # (B,)
             normalized_predicted_ged = predicted_ged / normalization_factor
@@ -282,7 +264,6 @@ def main():
     # Load the dataset from TUDataset
     dataset = TUDataset(root='data', name=dataset_name)
     ged_labels = get_ged_labels(distance_matrix)
-    # sizes = get_cost_matrix_sizes(dataset)
     sizes = get_sampled_cost_matrix_sizes(dataset)
 
     # Train/Test split
@@ -297,8 +278,9 @@ def main():
     # Prepare DataLoader
     triplet_train = TripletDataset(dataset, train_data_indices, ged_labels)
     siamese_train = SiameseDataset(dataset, ged_labels, pair_mode='train', train_indices=train_data_indices)
+    siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='test', test_indices=test_data_indices)
     siamese_eval = SiameseDataset(dataset, ged_labels, pair_mode='all', train_indices=train_data_indices, test_indices=test_data_indices)
-    siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='cross', train_indices=train_data_indices, test_indices=test_data_indices)
+
 
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
@@ -316,6 +298,8 @@ def main():
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
     k = 101
 
+    # 2 vs 39
+
     perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
     alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim, 64).to(device)
@@ -324,7 +308,7 @@ def main():
 
     # pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
     
-    rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
+    # rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
     # knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
 

@@ -67,13 +67,13 @@ class SiameseDataset(Dataset):
             self.train_indices = train_indices
             self.pairs = None
         
-        elif pair_mode == 'cross':
-            assert train_indices is not None and test_indices is not None
-            self.pairs = list(product(test_indices, train_indices))
+        elif pair_mode == 'test':
+            assert test_indices is not None
+            self.pairs = list(combinations(test_indices, r=2))
         
         elif pair_mode == 'all':
             assert train_indices is not None and test_indices is not None
-            total_indices = train_indices + test_indices
+            total_indices = sorted(train_indices + test_indices)
             self.pairs = list(combinations(total_indices, r=2))
         
         else:

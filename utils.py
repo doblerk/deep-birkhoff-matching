@@ -154,7 +154,7 @@ def plot_assignments(idx1, idx2, soft_assignment):
                 ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
 
     plt.axis('off')
-    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_no_mlp.png', dpi=1000)
+    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_no_mlp_TEST.png', dpi=1000)
 
 
 def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):
