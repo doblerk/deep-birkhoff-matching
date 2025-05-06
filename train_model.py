@@ -69,7 +69,6 @@ def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs
         soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
-        # normalized_predicted_ged = predicted_ged / normalization_factor
 
         # if idx == 2:
         #     import matplotlib.pyplot as plt
@@ -78,7 +77,7 @@ def extract_ged(loader, encoder, alpha_layer, device, max_graph_size, num_graphs
         #     sns.heatmap(padded_cost_matrices[59][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[0])
         #     sns.heatmap(soft_assignments[59][:13,:13].detach().cpu().numpy(), annot=True, ax=axs[1])
         #     plt.tight_layout()
-        #     plt.savefig('./res/MUTAG/graph2_vs_graph1_no_mlp_TEST.png', dpi=600, format='png')
+        #     plt.savefig('./res/MUTAG/graph2_vs_graph1_no_mlp_TEST2.png', dpi=600, format='png')
 
         #     plot_assignments(2, 1, soft_assignments[59].detach().cpu().numpy())
         #     break
@@ -145,7 +144,7 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
     return rmse
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=1):
+def train_triplet_encoder(loader, encoder, device, epochs=501):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -185,7 +184,7 @@ def train_triplet_encoder(loader, encoder, device, epochs=1):
     return encoder
 
 
-def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=1):
+def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
     encoder.eval()
     alpha_layer.train()
 
@@ -298,16 +297,14 @@ def main():
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
     k = 101
 
-    # 2 vs 39
-
     perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
     alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim, 64).to(device)
 
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    # pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
-    
+    pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
+
     # rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
     # knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)

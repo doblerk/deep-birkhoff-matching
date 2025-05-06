@@ -151,10 +151,10 @@ def plot_assignments(idx1, idx2, soft_assignment):
             if weight >= 0.1:
                 x_vals = [pos1[i][0], pos2[j][0]]
                 y_vals = [pos1[i][1], pos2[j][1]]
-                ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
+                ax.plot(x_vals, y_vals, color='red', alpha=1.25*weight, linewidth=4*weight)
 
     plt.axis('off')
-    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_no_mlp_TEST.png', dpi=1000)
+    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_no_mlp_TEST2.png', dpi=1000)
 
 
 def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):
@@ -227,11 +227,11 @@ def get_cost_matrix_sizes(dataset):
 
 
 def get_sampled_cost_matrix_sizes(dataset, num_samples=10000, seed=42):
-    random.seed(seed)
+    rng = np.random.default_rng(seed)
     n = len(dataset)
     sizes = []
     for _ in range(num_samples):
-        i, j = random.sample(range(n), 2)
+        i, j = rng.choice(range(n), 2)
         g1, g2 = dataset[i], dataset[j]
         small, large = sorted([g1.num_nodes, g2.num_nodes])
         sizes.append((small, large))
@@ -263,4 +263,34 @@ def visualize_node_embeddings(model, data):
     plt.title("Node Embedding Clusters (t-SNE)")
     plt.xlabel("Dim 1")
     plt.ylabel("Dim 2")
+    plt.show()
+
+
+def plot_querry_vs_closest(query_idx, pred_geds, dataset, N=5):
+
+    distances = pred_geds[query_idx, :]
+    distances[query_idx] = np.inf
+
+    sorted_idx = list(np.argsort(distances))[:N]
+
+    sorted_idx.insert(0, query_idx)
+
+    gs = [dataset[i] for i in sorted_idx]
+    Gs = [to_networkx(g, to_undirected=True) for g in gs]    
+    node_labels = [g.x.argmax(dim=1).numpy() for g in gs]
+    pos = [nx.kamada_kawai_layout(g) for g in Gs]
+
+    a = 3
+    for i in range(1, len(pos)):
+        p = pos[i]
+        for key in p:
+            p[key][0] += a
+        a += 3                                        
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+
+    for i in range(len(sorted_idx)):
+        nx.draw(Gs[i], pos=pos[i], ax=ax, node_color=node_labels[i], cmap=plt.cm.tab10, edge_color='gray', with_labels=True)
+    
+    plt.axis('off')
     plt.show()
