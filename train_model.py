@@ -280,7 +280,6 @@ def main():
     siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='test', test_indices=test_data_indices)
     siamese_eval = SiameseDataset(dataset, ged_labels, pair_mode='all', train_indices=train_data_indices, test_indices=test_data_indices)
 
-
     triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
     siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
     eval_loader = DataLoader(siamese_eval, batch_size=64, shuffle=False)
@@ -314,6 +313,12 @@ def main():
     
     # with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
     #     file.write(f'Runtime computation {runtime:.4f} seconds\n')
+
+    """
+    pearman’s Rank Correlation Coefficient
+    Kendall’s Rank Correlation Coefficient
+    Precision at peak
+    """
 
 
 if __name__ == '__main__':
