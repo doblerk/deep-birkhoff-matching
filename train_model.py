@@ -318,6 +318,9 @@ def main():
     pearman’s Rank Correlation Coefficient
     Kendall’s Rank Correlation Coefficient
     Precision at peak
+    https://github.com/Sangs3112/SimGNN/blob/master/README_en.md
+    https://github.com/yunshengb/SimGNN
+    https://www.nature.com/articles/s44335-025-00026-4
     """
 
 
