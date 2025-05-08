@@ -3,9 +3,9 @@ import numpy as np
 from time import time
 import torch.nn.functional as F
 
-from torch.utils.data import random_split
+from torch.utils.data import random_split, ConcatDataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.datasets import TUDataset
+from torch_geometric.datasets import TUDataset, GEDDataset
 
 from utils import get_ged_labels, \
                   triplet_collate_fn, \
@@ -16,11 +16,13 @@ from utils import get_ged_labels, \
                   generate_attention_masks, \
                   get_cost_matrix_sizes, \
                   get_sampled_cost_matrix_sizes, \
+                  ged_matrix_to_dict, \
+                  compute_rank_correlations, \
                   visualize_node_embeddings, plot_attention, plot_ged, knn_classifier, plot_assignments
 
 from model import Model
 
-from data_aug import TripletDataset, SiameseDataset#, SiameseTestDataset, SiameseEvalDataset
+from data_aug import TripletDataset, TripletNoLabelDataset, SiameseDataset, SiameseNoLabelDataset#, SiameseTestDataset, SiameseEvalDataset
 
 from diff_birkhoff import PermutationPool, \
                           AlphaPermutationLayer, \
@@ -144,11 +146,11 @@ def test_ged(loader, encoder, alpha_layer, device, max_graph_size):
     return rmse
 
 
-def train_triplet_encoder(loader, encoder, device, epochs=501):
+def train_triplet_encoder(loader, encoder, device, epochs=101):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
-
+    t0 = time()
     for epoch in range(epochs):
 
         total_loss = 0
@@ -173,28 +175,32 @@ def train_triplet_encoder(loader, encoder, device, epochs=501):
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item() * anchor_graphs.y.size(0)
-            total_samples += anchor_graphs.y.size(0)
+            # total_loss += loss.item() * anchor_graphs.y.size(0)
+            # total_samples += anchor_graphs.y.size(0)
+            total_loss += loss.item() * anchor_graphs.i.size(0)
+            total_samples += anchor_graphs.i.size(0)
 
         average_loss = total_loss / total_samples
         
         if epoch % 10 == 0:
             print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
-    
+    t1 = time()
+    print(t1-t0)
     return encoder
 
 
 def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
     encoder.eval()
     alpha_layer.train()
+    criterion = SoftGEDLoss()
+    criterion.train()
+    t0 = time()
 
     optimizer = torch.optim.Adam(
-        list(alpha_layer.parameters()),
+        list(alpha_layer.parameters()) + list(criterion.parameters()),
         lr=1e-3, 
         weight_decay=1e-5
     )
-    
-    criterion = SoftGEDLoss()
 
     for epoch in range(epochs):
 
@@ -242,67 +248,105 @@ def train_ged(loader, encoder, alpha_layer, device, max_graph_size, epochs=501):
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item() * batch1.y.size(0)
-            total_samples += batch1.y.size(0)
+            # total_loss += loss.item() * batch1.y.size(0)
+            # total_samples += batch1.y.size(0)
+            total_loss += loss.item() * batch1.i.size(0)
+            total_samples += batch1.i.size(0)
         
         average_loss = total_loss / total_samples
         
         if epoch % 10 == 0:
-            print(f"[GED] Epoch {epoch+1}/{epochs} - MSE: {average_loss:.4f} - RMSE: {np.sqrt(average_loss):.1f}")
-            
+            print(f"[GED] Epoch {epoch+1}/{epochs} - MSE: {average_loss:.4f} - RMSE: {np.sqrt(average_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+    t1 = time()
+    print(t1-t0)
+
+    print(normalized_predicted_ged)
+    print(ged_labels)
 
 def main():
 
-    dataset_name = 'MUTAG'
+    train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
+    test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
 
-    distance_matrix = np.load(f'./res/{dataset_name}/distances_alpha_-1.0.npy')
+    dataset = ConcatDataset([train_dataset, test_dataset])
 
-    # Set device to CUDA
+    ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
+
+    ged_dict = ged_matrix_to_dict(ged_matrix)
+    norm_ged_dict = ged_matrix_to_dict(norm_ged_matrix)
+
+    # norm = np.zeros_like(ged_matrix)
+    # for i in range(norm.shape[0]):
+    #     for j in range(i+1, norm.shape[1]):
+    #         norm[i,j] = (0.5 * (dataset[i].num_nodes + dataset[j].num_nodes))
+    # norm += norm.T
+    # np.fill_diagonal(norm, val=1.0)
+
+    triplet_train = TripletNoLabelDataset(train_dataset, train_dataset.i, ged_dict, k=50)
+
+    triplet_loader = DataLoader(triplet_train, batch_size=64 * 4, shuffle=True)
+
+    # dataset_name = 'MUTAG'
+
+    # distance_matrix = np.load(f'./res/{dataset_name}/distances_alpha_-1.0.npy')
+
+    # # Set device to CUDA
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Load the dataset from TUDataset
-    dataset = TUDataset(root='data', name=dataset_name)
-    ged_labels = get_ged_labels(distance_matrix)
+    # # Load the dataset from TUDataset
+    # dataset = TUDataset(root='data', name=dataset_name)
+    # ged_labels = get_ged_labels(distance_matrix)
     sizes = get_sampled_cost_matrix_sizes(dataset)
+    
+    # # Train/Test split
+    # total_len = len(dataset)
+    # train_len = int(0.8 * total_len)
+    # test_len = total_len - train_len
 
-    # Train/Test split
-    total_len = len(dataset)
-    train_len = int(0.8 * total_len)
-    test_len = total_len - train_len
-
-    generator = torch.Generator().manual_seed(42)
-    train_data, test_data = random_split(dataset, [train_len, test_len], generator=generator)
-    train_data_indices, test_data_indices = sorted(train_data.indices), sorted(test_data.indices)
+    # generator = torch.Generator().manual_seed(42)
+    # train_data, test_data = random_split(dataset, [train_len, test_len], generator=generator)
+    # train_data_indices, test_data_indices = sorted(train_data.indices), sorted(test_data.indices)
 
     # Prepare DataLoader
-    triplet_train = TripletDataset(dataset, train_data_indices, ged_labels)
-    siamese_train = SiameseDataset(dataset, ged_labels, pair_mode='train', train_indices=train_data_indices)
-    siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='test', test_indices=test_data_indices)
-    siamese_eval = SiameseDataset(dataset, ged_labels, pair_mode='all', train_indices=train_data_indices, test_indices=test_data_indices)
+    # triplet_train = TripletDataset(dataset, train_data_indices, ged_labels)
+    # siamese_train = SiameseDataset(dataset, ged_labels, pair_mode='train', train_indices=train_data_indices)
+    # siamese_test = SiameseDataset(dataset, ged_labels, pair_mode='test', test_indices=test_data_indices)
+    # siamese_eval = SiameseDataset(dataset, ged_labels, pair_mode='all', train_indices=train_data_indices, test_indices=test_data_indices)
 
-    triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
-    siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
-    eval_loader = DataLoader(siamese_eval, batch_size=64, shuffle=False)
-    test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
+    # triplet_loader = DataLoader(triplet_train, batch_size=64, shuffle=True)
+    # siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=True)
+    # eval_loader = DataLoader(siamese_eval, batch_size=64, shuffle=False)
+    # test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
+
+    siamese_train = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='train', train_indices=train_dataset.i)
+    siamese_test = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='cross', train_indices=train_dataset.i, test_indices=test_dataset.i)
+    siamese_extract = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='all', train_indices=train_dataset.i, test_indices=test_dataset.i)
+
+    siamese_loader = DataLoader(siamese_train, batch_size=64, shuffle=False)
+    # test_loader = DataLoader(siamese_test, batch_size=64, shuffle=False)
+    extract_loader = DataLoader(siamese_extract, batch_size=64, shuffle=False)
+
+    # print(norm_ged_dict)
 
     # Model
     embedding_dim = 64
-    encoder = Model(dataset.num_features, embedding_dim, 3).to(device)
+    # encoder = Model(dataset.num_features, embedding_dim, 3).to(device)
+    encoder = Model(train_dataset.num_features, embedding_dim, 3).to(device)
 
     encoder = train_triplet_encoder(triplet_loader, encoder, device)
     encoder.freeze_params(encoder) # you should not only freeze, but checkpoint the model as well
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 101
+    k = 21
 
     perm_pool = PermutationPool(max_n=max_graph_size, k=k, size_data=sizes)
 
-    alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim, 64).to(device)
+    alpha_layer = AlphaPermutationLayer(perm_pool, embedding_dim, 64 * 4).to(device)
 
     train_ged(siamese_loader, encoder, alpha_layer, device, max_graph_size)
 
-    pred_geds, runtime = extract_ged(eval_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
+    # pred_geds, runtime = extract_ged(extract_loader, encoder, alpha_layer, device, max_graph_size, len(dataset))
 
     # rmse = test_ged(test_loader, encoder, alpha_layer, device, max_graph_size)
 
@@ -313,6 +357,16 @@ def main():
     
     # with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
     #     file.write(f'Runtime computation {runtime:.4f} seconds\n')
+
+    # pred_matrix = np.load('./res/AIDS/test.npy') / norm
+
+    # pred_matrix[:460, :460]
+    # norm_ged_matrix = norm_ged_matrix[:460, :460]
+
+    # rho, tau = compute_rank_correlations(pred_matrix, ged_matrix)
+
+    # print(rho)
+    # print(tau)
 
     """
     pearman’s Rank Correlation Coefficient

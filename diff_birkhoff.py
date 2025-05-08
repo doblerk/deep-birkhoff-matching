@@ -25,10 +25,10 @@ class SoftGEDLoss(nn.Module):
 
     def __init__(self):
         super(SoftGEDLoss, self).__init__()
+        self.scale = nn.Parameter(torch.tensor(1.0))
     
     def forward(self, cost_matrices, assignment_matrices):
-        # return torch.einsum('bij,bij->', cost_matrices, assignment_matrices) # element-wise multiplication, followed by a summation
-        return torch.sum(cost_matrices * assignment_matrices, dim=(1, 2)) # (B,)
+        return torch.sum(cost_matrices * assignment_matrices, dim=(1, 2)) * self.scale # (B,)
 
 
 class PermutationPool:

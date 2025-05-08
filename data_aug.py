@@ -1,4 +1,5 @@
 import torch
+import random
 import numpy as np
 
 from itertools import product, combinations
@@ -40,6 +41,49 @@ class TripletDataset(Dataset):
         pos_graph_idx, _ = max(same_class, key=lambda x: x[1])
         # Hard negative = different class, min GED
         neg_graph_idx, _ = min(diff_class, key=lambda x: x[1])
+
+        pos_graph = self.graphs[pos_graph_idx]
+        neg_graph = self.graphs[neg_graph_idx]
+
+        return anchor_graph, pos_graph, neg_graph
+
+
+class TripletNoLabelDataset(Dataset):
+
+    def __init__(self, graphs, indices, ged_dict, k=25):
+        super(TripletNoLabelDataset, self).__init__()
+        self.graphs = graphs
+        self.indices = [int(i) for i in indices]
+        self.ged_dict = ged_dict
+        self.k = k
+
+        # Precompute sorted neighbors by GED
+        self.sorted_neighbors = {
+            i: sorted(
+                [(j, self._get_ged(i, j)) for j in self.indices if j != i],
+                key=lambda x: x[1]
+            )
+            for i in self.indices
+        }
+    
+    def __len__(self):
+        return len(self.indices)
+    
+    def _get_ged(self, i, j):
+        return self.ged_dict.get((i, j), self.ged_dict.get((j, i), 0.0))
+  
+    def __getitem__(self, idx):
+        anchor_idx = self.indices[idx]
+        anchor_graph = self.graphs[anchor_idx]
+        neighbors = self.sorted_neighbors[anchor_idx]
+
+        # Hard positive = sample one of the top-k closest
+        pos_candidates = neighbors[:self.k]
+        pos_graph_idx, _ = random.choice(pos_candidates)
+
+        # Hard negative: sample one of the bottom-k farthest
+        neg_candidates = neighbors[-self.k:]
+        neg_graph_idx, _ = random.choice(neg_candidates)
 
         pos_graph = self.graphs[pos_graph_idx]
         neg_graph = self.graphs[neg_graph_idx]
@@ -108,3 +152,65 @@ class SiameseDataset(Dataset):
             return g1, g2, torch.tensor(normalized_ged, dtype=torch.float), idx1, idx2
         else:
             return g1, g2, torch.tensor(normalized_ged, dtype=torch.float)
+
+
+class SiameseNoLabelDataset(Dataset):
+
+    def __init__(
+            self,
+            graphs,
+            norm_ged_matrix,
+            pair_mode='train', # 'train', 'cross', 'all'
+            train_indices=None,
+            test_indices=None,    
+    ):
+        super(SiameseNoLabelDataset, self).__init__()
+        self.graphs = graphs
+        self.norm_ged_matrix = norm_ged_matrix
+        self.pair_mode = pair_mode
+
+        if pair_mode == 'train':
+            assert train_indices is not None
+            self.train_indices = train_indices
+            self.pairs = None
+        
+        elif pair_mode == 'cross':
+            assert train_indices is not None and test_indices is not None
+            self.pairs = list(product(test_indices, train_indices))
+        
+        elif pair_mode == 'all':
+            assert train_indices is not None and test_indices is not None
+            self.pairs = list(combinations(range(len(graphs)), r=2))
+        
+        else:
+            raise ValueError(f'Unknown pair_mode: {pair_mode}')
+    
+    def _get_ged(self, i, j):
+        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
+    
+    def __len__(self):
+        if self.pair_mode == 'train':
+            return len(self.train_indices)
+        else:
+            return len(self.pairs)
+
+    def __getitem__(self, idx):
+        if self.pair_mode == 'train':
+            idx1 = self.train_indices[idx]
+            idx2 = int(random.choice(self.train_indices))
+        else:
+            idx1, idx2 = self.pairs[idx]
+        
+        g1, g2 = self.graphs[idx1], self.graphs[idx2]
+
+        # Order graphs consistently
+        if g1.num_nodes > g2.num_nodes:
+            g1, g2 = g2, g1
+        
+        norm_ged = self.norm_ged_matrix[idx1, idx2]
+        # norm_ged = self._get_ged(idx1, idx2)
+
+        if self.pair_mode == 'all':
+            return g1, g2, norm_ged, idx1, idx2
+        else:
+            return g1, g2, norm_ged

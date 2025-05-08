@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from itertools import combinations
 
+from scipy.stats import spearmanr, kendalltau
+
 from torch_geometric.data import Batch
 from torch_geometric.utils import to_networkx
 from torch_geometric.datasets import TUDataset
@@ -217,6 +219,14 @@ def get_ged_labels(distance_matrix):
     return ged_labels
 
 
+def ged_matrix_to_dict(ged_matrix):
+    return {
+        (i, j): float(ged_matrix[i, j])
+        for i in range(ged_matrix.shape[0])
+        for j in range(i + 1, ged_matrix.shape[1])
+    }
+
+
 def get_cost_matrix_sizes(dataset):
     sizes = []
     for i, j in combinations(range(len(dataset)), r=2):
@@ -294,3 +304,21 @@ def plot_querry_vs_closest(query_idx, pred_geds, dataset, N=5):
     
     plt.axis('off')
     plt.show()
+
+
+def extract_upper_triangular(matrix):
+    triu_indices = np.tril_indices(matrix.shape[0], k=1)
+    return matrix[triu_indices]
+
+
+def compute_rank_correlations(pred_matrix, true_matrix):
+    pred_flat = extract_upper_triangular(pred_matrix)
+    true_flat =extract_upper_triangular(true_matrix)
+
+    # Spearman's rho
+    spearman_rho, _ = spearmanr(pred_flat, true_flat)
+
+    # Kendall's tau
+    kendall_tau, _ = kendalltau(pred_flat, true_flat)
+
+    return spearman_rho, kendall_tau
