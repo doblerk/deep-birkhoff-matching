@@ -114,6 +114,7 @@ class AlphaPermutationLayer(nn.Module):
 
     def get_alpha_weights(self):
         return torch.softmax(self.alpha_logits / self.temperature, dim=1)
+
         
     def forward(self, graph_repr_b1, graph_repr_b2):
         # B = graph_repr_b1.size(0)

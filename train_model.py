@@ -19,6 +19,8 @@ from utils import get_ged_labels, \
                   ged_matrix_to_dict, \
                   compute_rank_correlations, \
                   plot_querry_vs_closest, \
+                  save_model, \
+                  compute_entropy, \
                   visualize_node_embeddings, plot_attention, plot_ged, knn_classifier, plot_assignments
 
 from model import Model
@@ -32,11 +34,11 @@ from diff_birkhoff import PermutationPool, \
                           TripletLoss
 
 
-def train_triplet_network(loader, encoder, device, epochs=11):
+def train_triplet_network(loader, encoder, device, epochs=501):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
-    t0 = time()
+    
     for epoch in range(epochs):
 
         total_loss = 0
@@ -70,8 +72,9 @@ def train_triplet_network(loader, encoder, device, epochs=11):
         
         if epoch % 10 == 0:
             print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
-    t1 = time()
-    print(t1-t0)
+    
+    # save_model(encoder, optimizer, 'encoder', epochs, './res/AIDS')
+
     return encoder
 
 
@@ -89,11 +92,6 @@ def extract_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size,
 
         batch1, batch2, ged_labels, idx1, idx2 = batch
         batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
-
-        # n_nodes_1 = batch1.batch.bincount()
-        # n_nodes_2 = batch2.batch.bincount()
-
-        # normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
         node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
         node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
@@ -129,6 +127,8 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
     alpha_layer.train()
     criterion.train()
 
+    alpha_entropy_epoch = []
+
     for batch in train_loader:
 
         batch1, batch2, ged_labels = batch
@@ -152,6 +152,9 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
 
         # Soft assignment via learnable alpha-weighted permutation matrices
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+
+        avg_entropy = compute_entropy(alphas)
+        alpha_entropy_epoch.append(avg_entropy)
         
         # Mask padded regions
         row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
@@ -169,6 +172,9 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
 
         loss.backward()
         optimizer.step()
+    
+    mean_alpha_entropy = sum(alpha_entropy_epoch) / len(alpha_entropy_epoch)
+    return mean_alpha_entropy
 
 
 @torch.no_grad()
@@ -264,7 +270,7 @@ def test_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_siz
     return average_test_loss
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, criterion, device, max_graph_size, epochs=101):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, criterion, device, max_graph_size, epochs=501):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
@@ -272,18 +278,24 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
         lr=1e-3, 
         weight_decay=1e-5
     )
-    t0 = time()
+
+    alpha_entropy_all_epochs = []
+    
     for epoch in range(epochs):
 
-        train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size)
+        alpha_entropy = train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size)
+        alpha_entropy_all_epochs.append(alpha_entropy)
 
         if epoch % 10 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
-    t1 = time()
-    print(t1-t0)
-    # average_test_loss = test_ged(test_loader, encoder, alpha_layer,criterion, device, max_graph_size)
-    # print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+
+    average_test_loss = test_ged(test_loader, encoder, alpha_layer,criterion, device, max_graph_size)
+    print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+
+    print(alpha_entropy_all_epochs)
+
+    # save_model(alpha_layer, optimizer, 'ged', epochs, './res/AIDS')
 
 
 def main():
@@ -336,10 +348,10 @@ def main():
     siamese_test = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='test', train_indices=train_dataset_indices, test_indices=test_dataset.i)
     siamese_all = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='all', train_indices=train_dataset_indices, test_indices=test_dataset.i)
 
-    siamese_train_loader = DataLoader(siamese_train, batch_size=64 * 12, shuffle=True, num_workers=4)
-    siamese_val_loader = DataLoader(siamese_val, batch_size=64 * 12, shuffle=False, num_workers=4)
-    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 12, shuffle=False)
-    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 32, shuffle=False)
+    siamese_train_loader = DataLoader(siamese_train, batch_size=64 * 4, shuffle=True, num_workers=2)
+    siamese_val_loader = DataLoader(siamese_val, batch_size=64 * 4, shuffle=False, num_workers=2)
+    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 12, shuffle=False, num_workers=2)
+    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 32, shuffle=False, num_workers=2)
 
     embedding_dim = 64
     encoder = Model(num_features, embedding_dim, 3).to(device)

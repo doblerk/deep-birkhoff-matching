@@ -1,4 +1,4 @@
-import random
+import os
 
 import numpy as np
 
@@ -392,3 +392,21 @@ def compute_rank_correlations(pred_matrix, true_matrix, k=10):
     # Precision at K
     p_at_k = precision_at_k(pred_matrix, true_matrix, k)
     return spearman_rho, kendall_tau, p_at_k
+
+
+def save_model(model, model_optimizer, name, epoch, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    
+    model_dict = {
+        'model_state_dict': model.state_dict(),
+        'optimizer': model_optimizer.state_dict(),
+        'epoch': epoch + 1,
+    }
+    torch.save(model_dict, os.path.join(output_dir, f'{name}_checkpoint.pth'))
+
+    print(f"[INFO] Models saved to {output_dir}")
+
+
+def compute_entropy(alphas):
+    entropy = -torch.sum(alphas * torch.log(alphas.clamp(min=1e-8)), dim=1)
+    return entropy.mean().item()
