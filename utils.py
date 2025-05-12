@@ -16,8 +16,9 @@ from itertools import combinations
 from scipy.stats import spearmanr, kendalltau
 
 from torch_geometric.data import Batch
+from torch.utils.data import random_split, ConcatDataset
 from torch_geometric.utils import to_networkx
-from torch_geometric.datasets import TUDataset
+from torch_geometric.datasets import TUDataset, GEDDataset
 
 from sklearn.metrics import f1_score
 from sklearn.neighbors import KNeighborsClassifier
@@ -55,16 +56,64 @@ def compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
     return distance_matrices
 
 
+# def pad_cost_matrices(cost_matrices, max_graph_size, pad_value=0.0):
+#     padded = []
+#     for cost in cost_matrices:
+#         n1, n2 = cost.shape
+#         pad_bottom = max_graph_size - n1
+#         pad_right = max_graph_size - n2
+#         padded_cost = F.pad(cost, (0, pad_right, 0, pad_bottom), value=pad_value)
+#         padded.append(padded_cost)
+#     return torch.stack(padded)
+
 def pad_cost_matrices(cost_matrices, max_graph_size, pad_value=0.0):
     padded = []
     for cost in cost_matrices:
         n1, n2 = cost.shape
-        pad_bottom = max_graph_size - n1
-        pad_right = max_graph_size - n2
-        padded_cost = F.pad(cost, (0, pad_right, 0, pad_bottom), value=pad_value)
-        padded.append(padded_cost)
-    return torch.stack(padded)
+        square_size = max(n1, n2)
 
+        # First: make square (insertion/deletion)
+        cost = F.pad(cost, (0, square_size - n2, 0, square_size - n1), value=pad_value)
+
+        # Second: pad to common batch-wide size
+        pad_bottom = max_graph_size - square_size
+        pad_right = max_graph_size - square_size
+        cost = F.pad(cost, (0, pad_right, 0, pad_bottom), value=0.0)
+
+        padded.append(cost)
+
+    return torch.stack(padded)  # shape: (B, max_graph_size, max_graph_size)
+
+
+def get_masks(cost_matrices, max_graph_size):
+    """
+    Generate masks for square padding (to handle insertions/deletions)
+    and batch padding (to pad to max_graph_size).
+    """
+    square_masks = []
+    batch_masks = []
+
+    for cost in cost_matrices:
+        n1, n2 = cost.shape
+        
+        # Create the square mask (for insertions/deletions)
+        square_mask = torch.ones_like(cost, dtype=torch.bool)
+        
+        # Mask out the padded rows and columns (square padding)
+        if n1 < n2:  # Insertion in rows
+            square_mask[n1:] = 0
+        elif n2 < n1:  # Insertion in columns
+            square_mask[:, n2:] = 0
+
+        # Create the batch mask (for padding to max_graph_size)
+        batch_mask = torch.ones_like(cost, dtype=torch.bool)
+        batch_mask[n1:, :] = 0  # Padding in rows
+        batch_mask[:, n2:] = 0  # Padding in columns
+
+        square_masks.append(square_mask)
+        batch_masks.append(batch_mask)
+
+    return torch.stack(square_masks), torch.stack(batch_masks)
 
 def get_node_masks(batch, max_size):
     """
@@ -124,7 +173,11 @@ def plot_ged(test_preds, distance_matrix, test_data_indices, train_data_indices)
 
 
 def plot_assignments(idx1, idx2, soft_assignment):
-    dataset = TUDataset(root='data', name='MUTAG')
+    # dataset = TUDataset(root='data', name='MUTAG')
+    train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
+    test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
+    dataset = ConcatDataset([train_dataset, test_dataset])
+    
     g1 = dataset[idx1]
     g2 = dataset[idx2]
     
@@ -137,14 +190,16 @@ def plot_assignments(idx1, idx2, soft_assignment):
     pos1 = nx.kamada_kawai_layout(G1)  # positions for nodes in G1
     pos2 = nx.kamada_kawai_layout(G2)  # positions for nodes in G2
 
+    color_list = sns.color_palette("tab20", 20) + sns.color_palette("Set3", 9)  # Total = 29
+
     # Optionally, offset pos2 so the two graphs don't overlap
     for key in pos2:
         pos2[key][0] += 3                                              
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    nx.draw(G1, pos=pos1, ax=ax, node_color=node_labels1, cmap=plt.cm.tab10, edge_color='gray', with_labels=True)
-    nx.draw(G2, pos=pos2, ax=ax, node_color=node_labels2, cmap=plt.cm.tab10, edge_color='gray', with_labels=True)
+    nx.draw(G1, pos=pos1, ax=ax, node_color=[color_list[label] for label in node_labels1], edge_color='gray', with_labels=True)
+    nx.draw(G2, pos=pos2, ax=ax, node_color=[color_list[label] for label in node_labels2], edge_color='gray', with_labels=True)
 
     # Overlay soft assignments as weighted edges
     for i in range(len(G1.nodes)):
@@ -153,10 +208,11 @@ def plot_assignments(idx1, idx2, soft_assignment):
             if weight >= 0.1:
                 x_vals = [pos1[i][0], pos2[j][0]]
                 y_vals = [pos1[i][1], pos2[j][1]]
-                ax.plot(x_vals, y_vals, color='red', alpha=1.25*weight, linewidth=4*weight)
+                ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
 
     plt.axis('off')
-    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}_no_mlp_TEST2.png', dpi=1000)
+    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}.png', dpi=1000)
+    # plt.show()
 
 
 def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):
@@ -281,7 +337,7 @@ def plot_querry_vs_closest(query_idx, pred_geds, dataset, N=5):
     distances = pred_geds[query_idx, :]
     distances[query_idx] = np.inf
 
-    sorted_idx = list(np.argsort(distances))[:N]
+    sorted_idx = list(np.argsort(distances))[4:4+N]
 
     sorted_idx.insert(0, query_idx)
 
@@ -311,14 +367,28 @@ def extract_upper_triangular(matrix):
     return matrix[triu_indices]
 
 
-def compute_rank_correlations(pred_matrix, true_matrix):
-    pred_flat = extract_upper_triangular(pred_matrix)
-    true_flat =extract_upper_triangular(true_matrix)
+def precision_at_k(pred_matrix, true_matrix, k=10):
+    pred_flat = pred_matrix.flatten()
+    true_flat = true_matrix.flatten()
 
+    topk_pred_indices = np.argpartition(-pred_flat, k)[:k]
+    topk_true_indices = np.argpartition(-true_flat, k)[:k]
+
+    topk_pred_set = set(topk_pred_indices)
+    topk_true_set = set(topk_true_indices)
+
+    intersection_count = len(topk_pred_set & topk_true_set)
+
+    return intersection_count / k
+
+
+def compute_rank_correlations(pred_matrix, true_matrix, k=10):
     # Spearman's rho
-    spearman_rho, _ = spearmanr(pred_flat, true_flat)
+    spearman_rho, _ = spearmanr(pred_matrix, true_matrix, axis=None)
 
     # Kendall's tau
-    kendall_tau, _ = kendalltau(pred_flat, true_flat)
+    kendall_tau, _ = kendalltau(pred_matrix.flatten(), true_matrix.flatten())
 
-    return spearman_rho, kendall_tau
+    # Precision at K
+    p_at_k = precision_at_k(pred_matrix, true_matrix, k)
+    return spearman_rho, kendall_tau, p_at_k

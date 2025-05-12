@@ -75,6 +75,7 @@ class TripletNoLabelDataset(Dataset):
     def __getitem__(self, idx):
         anchor_idx = self.indices[idx]
         anchor_graph = self.graphs[anchor_idx]
+
         neighbors = self.sorted_neighbors[anchor_idx]
 
         # Hard positive = sample one of the top-k closest
@@ -160,8 +161,9 @@ class SiameseNoLabelDataset(Dataset):
             self,
             graphs,
             norm_ged_matrix,
-            pair_mode='train', # 'train', 'cross', 'all'
+            pair_mode='train', # 'train', 'val', 'test', 'all'
             train_indices=None,
+            val_indices=None,
             test_indices=None,    
     ):
         super(SiameseNoLabelDataset, self).__init__()
@@ -174,7 +176,12 @@ class SiameseNoLabelDataset(Dataset):
             self.train_indices = train_indices
             self.pairs = None
         
-        elif pair_mode == 'cross':
+        elif pair_mode == 'val':
+            assert val_indices is not None
+            self.val_indices = val_indices
+            self.pairs = None
+        
+        elif pair_mode == 'test':
             assert train_indices is not None and test_indices is not None
             self.pairs = list(product(test_indices, train_indices))
         
@@ -191,6 +198,10 @@ class SiameseNoLabelDataset(Dataset):
     def __len__(self):
         if self.pair_mode == 'train':
             return len(self.train_indices)
+        
+        elif self.pair_mode == 'val':
+            return len(self.val_indices)
+        
         else:
             return len(self.pairs)
 
@@ -198,6 +209,11 @@ class SiameseNoLabelDataset(Dataset):
         if self.pair_mode == 'train':
             idx1 = self.train_indices[idx]
             idx2 = int(random.choice(self.train_indices))
+        
+        elif self.pair_mode == 'val':
+            idx1 = self.val_indices[idx]
+            idx2 = int(random.choice(self.val_indices))
+        
         else:
             idx1, idx2 = self.pairs[idx]
         
@@ -206,6 +222,7 @@ class SiameseNoLabelDataset(Dataset):
         # Order graphs consistently
         if g1.num_nodes > g2.num_nodes:
             g1, g2 = g2, g1
+            # idx1, idx2 = idx2, idx1
         
         norm_ged = self.norm_ged_matrix[idx1, idx2]
         # norm_ged = self._get_ged(idx1, idx2)

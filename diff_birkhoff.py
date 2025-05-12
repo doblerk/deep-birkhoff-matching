@@ -63,12 +63,13 @@ class PermutationPool:
         perms.append(tuple(identity))
 
         for _ in range(self.k - 1):
-            n, m = self._sample_size()
-            perm_len = min(n, m)
-            perm = self.rng.permutation(perm_len)
-            vector = -1 * np.ones(self.max_n, dtype=int)
-            vector[:perm_len] = perm
-            perms.append(tuple(vector))
+            # n, m = self._sample_size()
+            # perm_len = min(n, m)
+            # perm = self.rng.permutation(perm_len)
+            # vector = -1 * np.ones(self.max_n, dtype=int)
+            # vector[:perm_len] = perm
+            # perms.append(tuple(vector))
+            perms.append(tuple(self.rng.permutation(self.max_n)))
 
         return torch.tensor(perms, dtype=torch.long)
 
@@ -90,23 +91,38 @@ class PermutationPool:
 
 class AlphaPermutationLayer(nn.Module):
    
-    def __init__(self, perm_pool: PermutationPool, embedding_dim: int, max_batch_size: int):
+    def __init__(self, perm_pool: PermutationPool, perm_matrices: PermutationPool, embedding_dim: int, max_batch_size: int):
         super(AlphaPermutationLayer, self).__init__()
         self.perm_pool = perm_pool
         self.k = perm_pool.k
         self.temperature = 0.8
+        self.perms = perm_matrices
 
-        self.alpha_logits = nn.Parameter(torch.randn(max_batch_size, perm_pool.k), requires_grad=True)
+        # self.alpha_logits = nn.Parameter(torch.randn(max_batch_size, perm_pool.k), requires_grad=True)
+
+        dim = 128
+        self.alpha_mlp = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(2 * embedding_dim, dim * 2),
+            nn.ReLU(),
+            nn.LayerNorm(dim * 2),
+            nn.Dropout(0.2),
+            nn.Linear(dim * 2, 2 * embedding_dim),
+            nn.ReLU(),
+            nn.Linear(2 * embedding_dim, self.k)
+        )
 
     def get_alpha_weights(self):
         return torch.softmax(self.alpha_logits / self.temperature, dim=1)
         
-    def forward(self, graph_repr_b1):
-        B = graph_repr_b1.size(0)
-        alpha_logits = self.alpha_logits[:B]  # [B, k]
-        alphas = F.softmax(alpha_logits / self.temperature, dim=1)
-        perms = self.perm_pool.get_matrix_batch().to(graph_repr_b1.device) # (B, maxN, maxN)
-        soft_assignments = torch.einsum('bk,kij->bij', alphas, perms)
+    def forward(self, graph_repr_b1, graph_repr_b2):
+        # B = graph_repr_b1.size(0)
+        # alpha_logits = self.alpha_logits[:B]  # [B, k]
+        # alphas = F.softmax(alpha_logits / self.temperature, dim=1)
+        pair_repr = torch.cat([graph_repr_b1, graph_repr_b2], dim=1) # (B, 2D)
+        alpha_logits = self.alpha_mlp(pair_repr) # (B, k)
+        alphas = F.softmax(alpha_logits / self.temperature, dim=1) # (B, k)
+        soft_assignments = torch.einsum('bk,kij->bij', alphas, self.perms)
         return soft_assignments, alphas
 
 

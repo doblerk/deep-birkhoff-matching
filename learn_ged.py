@@ -237,3 +237,107 @@ class AlphaPermutationLayer(nn.Module):
         perms = self.perm_pool.get_matrix_batch().to(graph_repr_b1.device) # (B, maxN, maxN)
         soft_assignments = torch.einsum('bk,kij->bij', alphas, perms)
         return soft_assignments, alphas
+
+
+
+#####
+
+knn_classifier(pred_geds, train_data_indices, test_data_indices, dataset_name)
+
+with open(f'./res/{dataset.name}/rmse_loss.txt', 'a') as file:
+    file.write(f'Test RMSE: {rmse}\n')
+
+with open(f'./res/{dataset.name}/runtimes.txt', 'a') as file:
+    file.write(f'Runtime computation {runtime:.4f} seconds\n')
+
+
+if idx == 28:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    fig, axs = plt.subplots(1, 2, figsize=(16,8))
+    sns.heatmap(padded_cost_matrices[61].detach().cpu().numpy(), annot=True, ax=axs[0])
+    sns.heatmap(soft_assignments[61].detach().cpu().numpy(), annot=True, ax=axs[1])
+    plt.tight_layout()
+    plt.savefig('./res/MUTAG/graph20_vs_graph628.png', dpi=600, format='png')
+    plot_assignments(20, 628, soft_assignments[61].detach().cpu().numpy())
+
+
+import matplotlib.pyplot as plt
+n = 5
+fig, axs = plt.subplots(n, 2, figsize=(14,16))
+for i in range(n):
+    axs[i][0].imshow(padded_cost_matrices[i].detach().cpu().numpy())
+    axs[i][1].imshow(soft_assignments[i].detach().cpu().numpy())
+plt.tight_layout()
+plt.show()
+plot_assignments(19, 20, soft_assignments[22].detach().cpu().numpy())
+
+
+if idx == 28:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.heatmap(soft_assignments[61].detach().cpu().numpy(), annot=True)
+    plt.show()
+
+
+tud_dataset = TUDataset(root='data', name='AIDS')
+
+tud_dataset_filtered = []
+
+for i in range(len(tud_dataset)):
+    g = tud_dataset[i]
+    if g.x.shape[0] <= 10:
+        tud_dataset_filtered.append(g)
+
+print(len(tud_dataset_filtered))
+print(ged_matrix[20, 628])
+
+import matplotlib.pyplot as plt
+fig, axs = plt.subplots(1, 2, figsize=(14, 8))
+axs[0].imshow(dataset[20].x.numpy())
+axs[1].imshow(dataset[628].x.numpy())
+plt.show()
+
+for i, batch in enumerate(siamese_all_loader):
+    b1, b2, ged, idx1, idx2 = batch
+    indices = list(zip(idx1, idx2))
+    if (20, 628) in indices:
+        print(i, ' ', indices.index((20, 628)))
+        break
+
+pred_matrix = np.load('./res/AIDS/test.npy')
+print(pred_matrix[19, 20])
+print(ged_matrix[19, 20])
+
+print(train_dataset[19].x)
+print(train_dataset[20].x)
+with open('res/AIDS/test.npy', 'wb') as f:
+    np.save(f, pred_geds)
+
+pred_matrix = pred_matrix[:560, :560]
+pred_matrix = pred_matrix.flatten().tolist()
+pred_matrix_norm = ((pred_matrix - np.min(pred_matrix)) / (np.max(pred_matrix) - np.min(pred_matrix))).squeeze()
+
+true_matrix = norm_ged_matrix[:560, :560]
+true_matrix = true_matrix.flatten().tolist()
+true_matrix_norm = ((true_matrix - np.min(true_matrix)) / (np.max(true_matrix) - np.min(true_matrix))).squeeze()
+
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(8,8))
+ax.scatter(true_matrix_norm, pred_matrix_norm, s=26, alpha=0.75, edgecolor='lightgrey', c='grey', linewidth=0.5)
+ax.plot(true_matrix_norm, true_matrix_norm, linestyle='-', linewidth=1, color='black')
+ax.set_xlabel('BP-GED', fontsize=22)
+ax.set_ylabel('GNN-GED', fontsize=22)
+ax.spines[['right', 'top']].set_visible(False)
+plt.tight_layout()
+plt.show()
+
+
+"""
+pearman’s Rank Correlation Coefficient
+Kendall’s Rank Correlation Coefficient
+Precision at peak
+https://github.com/Sangs3112/SimGNN/blob/master/README_en.md
+https://github.com/yunshengb/SimGNN
+https://www.nature.com/articles/s44335-025-00026-4
+"""
