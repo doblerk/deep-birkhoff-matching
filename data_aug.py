@@ -208,16 +208,30 @@ class SiameseNoLabelDataset(Dataset):
     def __getitem__(self, idx):
         if self.pair_mode == 'train':
             idx1 = self.train_indices[idx]
-            idx2 = int(random.choice(self.train_indices))
+
+            if random.random() < 0.2:
+                idx2 = idx1
+                g1 = self.graphs[idx1]
+                g2 = g1.clone()
+                norm_ged = 0.0
+            
+            else:
+                idx2 = int(random.choice(self.train_indices))
+                g1, g2 = self.graphs[idx1], self.graphs[idx2]
+                norm_ged = self.norm_ged_matrix[idx1, idx2]
         
         elif self.pair_mode == 'val':
             idx1 = self.val_indices[idx]
             idx2 = int(random.choice(self.val_indices))
+            g1, g2 = self.graphs[idx1], self.graphs[idx2]
+            norm_ged = self.norm_ged_matrix[idx1, idx2]
         
         else:
             idx1, idx2 = self.pairs[idx]
+            g1, g2 = self.graphs[idx1], self.graphs[idx2]
+            norm_ged = self.norm_ged_matrix[idx1, idx2]
         
-        g1, g2 = self.graphs[idx1], self.graphs[idx2]
+        # g1, g2 = self.graphs[idx1], self.graphs[idx2]
 
         # Order graphs consistently
         if g1.num_nodes > g2.num_nodes:

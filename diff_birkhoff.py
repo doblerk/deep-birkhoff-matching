@@ -32,7 +32,7 @@ class SoftGEDLoss(nn.Module):
 
 
 class PermutationPool:
-    def __init__(self, max_n, k, size_data, seed: int = 42):
+    def __init__(self, max_n, k, seed: int = 42):
         """
         Args:
             max_n (int): Maximum graph size (i.e., full matrix size: max_n x max_n)
@@ -43,8 +43,8 @@ class PermutationPool:
         self.rng = np.random.default_rng(seed)
         self.max_n = max_n
         self.k = k
-        self.size_data = size_data
-        self.kde = gaussian_kde(size_data.T)
+        # self.size_data = size_data
+        # self.kde = gaussian_kde(size_data.T)
         self.perm_vectors = self._generate_permutation_vectors()
     
     def _sample_size(self):
@@ -95,18 +95,18 @@ class AlphaPermutationLayer(nn.Module):
         super(AlphaPermutationLayer, self).__init__()
         self.perm_pool = perm_pool
         self.k = perm_pool.k
-        self.temperature = 0.8
+        self.temperature = 1.0
         self.perms = perm_matrices
 
         # self.alpha_logits = nn.Parameter(torch.randn(max_batch_size, perm_pool.k), requires_grad=True)
 
-        dim = 128
+        dim = embedding_dim * 2
         self.alpha_mlp = nn.Sequential(
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             nn.Linear(2 * embedding_dim, dim * 2),
             nn.ReLU(),
             nn.LayerNorm(dim * 2),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             nn.Linear(dim * 2, 2 * embedding_dim),
             nn.ReLU(),
             nn.Linear(2 * embedding_dim, self.k)
@@ -114,7 +114,6 @@ class AlphaPermutationLayer(nn.Module):
 
     def get_alpha_weights(self):
         return torch.softmax(self.alpha_logits / self.temperature, dim=1)
-
         
     def forward(self, graph_repr_b1, graph_repr_b2):
         # B = graph_repr_b1.size(0)
