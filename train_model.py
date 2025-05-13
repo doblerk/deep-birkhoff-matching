@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data import random_split, ConcatDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset, GEDDataset
+from torch_geometric.transforms import Constant
 
 from utils import get_ged_labels, \
                   triplet_collate_fn, \
@@ -294,11 +295,15 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
 def main():
 
-    train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
-    test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
+    train_dataset = GEDDataset(root='data/datasets/LINUX', name='LINUX', train=True)
+    test_dataset = GEDDataset(root='data/datasets/LINUX', name='LINUX', train=False)
 
+    if 'x' not in train_dataset[0]:
+        train_dataset.transform = Constant(value=1.0)
+        test_dataset.transform = Constant(value=1.0)
+    
     dataset = ConcatDataset([train_dataset, test_dataset])
-
+    
     num_features = train_dataset.num_features
 
     ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
