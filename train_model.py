@@ -105,8 +105,8 @@ def extract_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size,
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-        row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
-        col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
+        row_masks = get_node_masks(batch1, max_graph_size)
+        col_masks = get_node_masks(batch2, max_graph_size)
 
         assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 
@@ -156,8 +156,8 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
         
         # Mask padded regions
-        row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
-        col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
+        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
         # (B, maxN, 1) * (B, 1, maxN) -> broadcast to (B, maxN, maxN)
         assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
@@ -207,8 +207,8 @@ def eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-        row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
-        col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
+        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
         assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 
@@ -256,8 +256,8 @@ def test_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_siz
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-        row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
-        col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
+        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
         assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 

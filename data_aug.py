@@ -230,16 +230,11 @@ class SiameseNoLabelDataset(Dataset):
             idx1, idx2 = self.pairs[idx]
             g1, g2 = self.graphs[idx1], self.graphs[idx2]
             norm_ged = self.norm_ged_matrix[idx1, idx2]
-        
-        # g1, g2 = self.graphs[idx1], self.graphs[idx2]
 
         # Order graphs consistently
         if g1.num_nodes > g2.num_nodes:
             g1, g2 = g2, g1
             # idx1, idx2 = idx2, idx1
-        
-        norm_ged = self.norm_ged_matrix[idx1, idx2]
-        # norm_ged = self._get_ged(idx1, idx2)
 
         if self.pair_mode == 'all':
             return g1, g2, norm_ged, idx1, idx2

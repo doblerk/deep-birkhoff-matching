@@ -37,20 +37,14 @@ def compute_cost_matrix(representations1, representations2):
     return torch.cdist(representations1, representations2, p=2)
 
 
-def compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2):
-    num_graphs = batch1.batch.max().item() + 1
-
-    # Precompute all distances (between all nodes)
-    all_dists = torch.cdist(node_repr_b1, node_repr_b2, p=2)  # [N1, N2]
-
-    # Build index lists for each graph
-    b1_indices = [((batch1.batch == i).nonzero(as_tuple=True)[0]) for i in range(num_graphs)]
-    b2_indices = [((batch2.batch == i).nonzero(as_tuple=True)[0]) for i in range(num_graphs)]
+def compute_graphwise_node_distances(node_repr_b1, counts1, node_repr_b2, counts2):
+    # Split node embeddings by graph
+    b1_node_splits = torch.split(node_repr_b1, counts1.tolist())
+    b2_node_splits = torch.split(node_repr_b2, counts2.tolist())
     
-    # Gather relevant slices
     distance_matrices = [
-        all_dists[idx1][:, idx2]
-        for idx1, idx2 in zip(b1_indices, b2_indices)
+        torch.cdist(b1, b2, p=2)
+        for b1, b2 in zip(b1_node_splits, b2_node_splits)
     ]
 
     return distance_matrices
@@ -67,22 +61,20 @@ def compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
 #     return torch.stack(padded)
 
 def pad_cost_matrices(cost_matrices, max_graph_size, pad_value=0.0):
-    padded = []
-    for cost in cost_matrices:
+    device = cost_matrices[0].device
+    B = len(cost_matrices)
+    padded_batch = torch.full(
+        (B, max_graph_size, max_graph_size),
+        pad_value,
+        device=device,
+        dtype=cost_matrices[0].dtype
+    )
+
+    for i, cost in enumerate(cost_matrices):
         n1, n2 = cost.shape
-        square_size = max(n1, n2)
+        padded_batch[i, :n1, :n2] = cost
 
-        # First: make square (insertion/deletion)
-        cost = F.pad(cost, (0, square_size - n2, 0, square_size - n1), value=pad_value)
-
-        # Second: pad to common batch-wide size
-        pad_bottom = max_graph_size - square_size
-        pad_right = max_graph_size - square_size
-        cost = F.pad(cost, (0, pad_right, 0, pad_bottom), value=0.0)
-
-        padded.append(cost)
-
-    return torch.stack(padded)  # shape: (B, max_graph_size, max_graph_size)
+    return padded_batch
 
 
 def get_masks(cost_matrices, max_graph_size):
@@ -115,18 +107,14 @@ def get_masks(cost_matrices, max_graph_size):
 
     return torch.stack(square_masks), torch.stack(batch_masks)
 
-def get_node_masks(batch, max_size):
+def get_node_masks(batch, max_size, counts):
     """
     batch: torch_geometric.data.Batch object
     returns: [B, max_size] tensor, 1 for real nodes, 0 for padded
     """
     device = batch.batch.device
-    counts = batch.batch.bincount()
-    B = counts.size(0)
-
-    masks = torch.zeros(B, max_size, device=device, dtype=torch.bool)
-    for i, count in enumerate(counts):
-        masks[i, :count] = True
+    idx = torch.arange(max_size, device=device).unsqueeze(0) # [1, B]
+    masks = idx < counts.unsqueeze(1) # [B, max_size]
     return masks
 
 
