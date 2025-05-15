@@ -76,8 +76,6 @@ def extract_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size,
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
 
         distance_matrix[idx1, idx2] = predicted_ged
-        
-        break
     
     t1 = time()
     runtime = t1 - t0
@@ -114,7 +112,7 @@ def main():
 
     siamese_all = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='all', train_indices=train_dataset_indices, test_indices=test_dataset.i)
 
-    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 64, shuffle=False, num_workers=0, pin_memory=True)
+    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 392, shuffle=False, num_workers=0, pin_memory=True)
 
     # Load models
     embedding_dim = 64
@@ -152,7 +150,7 @@ def main():
     alpha_layer = alpha_layer.to(device)
     criterion = criterion.to(device)
 
-    pred_geds = extract_ged(siamese_all_loader, encoder, alpha_layer, criterion, device, max_graph_size, len(dataset))
+    # pred_geds = extract_ged(siamese_all_loader, encoder, alpha_layer, criterion, device, max_graph_size, len(dataset))
 
 
 if __name__ == '__main__':

@@ -398,3 +398,15 @@ def save_model(model, model_optimizer, name, epoch, output_dir):
 def compute_entropy(alphas):
     entropy = -torch.sum(alphas * torch.log(alphas.clamp(min=1e-8)), dim=1)
     return entropy.mean().item()
+
+def extract_scale_value(file_path):
+    import re
+    with open(file_path, 'r') as f:
+        content = f.read()
+
+    # Find all scale values using regex
+    matches = re.findall(r'Scale\s*:\s*([+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?)', content)
+    
+    # Extract only the numeric part (group 1)
+    scale_values = [float(match[0]) for match in matches[:-1]]
+    return scale_values

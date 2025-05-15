@@ -213,7 +213,7 @@ class SiameseNoLabelDataset(Dataset):
                 idx2 = idx1
                 g1 = self.graphs[idx1]
                 g2 = g1.clone()
-                norm_ged = 0.0
+                norm_ged = torch.tensor(0.0)
             
             else:
                 idx2 = int(random.choice(self.train_indices))

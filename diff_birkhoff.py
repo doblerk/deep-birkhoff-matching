@@ -91,7 +91,7 @@ class PermutationPool:
 
 class AlphaPermutationLayer(nn.Module):
    
-    def __init__(self, perm_pool: PermutationPool, perm_matrices: PermutationPool, embedding_dim: int, max_batch_size: int):
+    def __init__(self, perm_pool: PermutationPool, perm_matrices: PermutationPool, embedding_dim: int):
         super(AlphaPermutationLayer, self).__init__()
         self.perm_pool = perm_pool
         self.k = perm_pool.k

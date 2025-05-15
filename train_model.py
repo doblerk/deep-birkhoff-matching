@@ -22,6 +22,7 @@ from utils import get_ged_labels, \
                   plot_querry_vs_closest, \
                   save_model, \
                   compute_entropy, \
+                  extract_scale_value, \
                   visualize_node_embeddings, plot_attention, plot_ged, knn_classifier, plot_assignments
 
 from model import Model
@@ -64,8 +65,6 @@ def train_triplet_network(loader, encoder, device, epochs=1001):
             loss.backward()
             optimizer.step()
 
-            # total_loss += loss.item() * anchor_graphs.y.size(0)
-            # total_samples += anchor_graphs.y.size(0)
             total_loss += loss.item() * anchor_graphs.i.size(0)
             total_samples += anchor_graphs.i.size(0)
 
@@ -94,19 +93,22 @@ def extract_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size,
 
     for batch in loader:
 
-        batch1, batch2, ged_labels, idx1, idx2 = batch
-        batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
+        batch1, batch2, _, idx1, idx2 = batch
+        batch1, batch2, idx1, idx2 = batch1.to(device), batch2.to(device), idx1.to(device), idx2.to(device)
+
+        n_nodes_1 = batch1.batch.bincount()
+        n_nodes_2 = batch2.batch.bincount()
 
         node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
         node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-        cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
+        cost_matrices = compute_graphwise_node_distances(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-        row_masks = get_node_masks(batch1, max_graph_size)
-        col_masks = get_node_masks(batch2, max_graph_size)
+        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
         assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 
@@ -121,10 +123,11 @@ def extract_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size,
     
     t1 = time()
     runtime = t1 - t0
+    print('Runtime: ', runtime)
 
     distance_matrix = torch.maximum(distance_matrix, distance_matrix.T)
 
-    return distance_matrix.cpu().numpy(), runtime
+    return distance_matrix.cpu().numpy()
 
 
 def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size):
@@ -148,7 +151,7 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
             node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)    # [n1, D]
             node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)    # [n2, D]
         
-        cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
+        cost_matrices = compute_graphwise_node_distances(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
 
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
@@ -201,7 +204,7 @@ def eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size
         node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
         node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-        cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
+        cost_matrices = compute_graphwise_node_distances(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
 
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
@@ -251,7 +254,7 @@ def test_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_siz
         node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
         node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-        cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
+        cost_matrices = compute_graphwise_node_distances(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
@@ -279,7 +282,7 @@ def test_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_siz
     return average_test_loss
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, criterion, device, max_graph_size, epochs=1001):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, criterion, device, max_graph_size, epochs=1):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
@@ -333,9 +336,9 @@ def main():
 
     ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
 
-    train_size = int(0.75 * len(train_dataset)) # 420
-    val_size = len(train_dataset) - train_size # 140
-
+    train_size = int(0.75 * len(train_dataset)) # 420, 600, 900
+    val_size = len(train_dataset) - train_size # 140, 200, 300
+    
     generator = torch.Generator().manual_seed(42)
     train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size], generator=generator)
     train_dataset_indices, val_dataset_indices = sorted(train_dataset.indices), sorted(val_dataset.indices)
@@ -350,7 +353,7 @@ def main():
     # norm += norm.T
     # np.fill_diagonal(norm, val=1.0)
 
-    # distance_matrix = np.load(f'/home/dobleraemon/Documents/PhD/compute-ged/results/AIDS/distances_alpha_-1.0.npy')
+    # distance_matrix = np.load(f'res/IMDB/distances_alpha_-1.0.npy')
 
     # norm_distance_matrix = distance_matrix / norm
 
@@ -390,7 +393,7 @@ def main():
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
-    alpha_layer = AlphaPermutationLayer(perm_pool, perm_matrices, embedding_dim, 64 * 4).to(device)
+    alpha_layer = AlphaPermutationLayer(perm_pool, perm_matrices, embedding_dim).to(device)
 
     criterion = SoftGEDLoss().to(device)
 
@@ -400,12 +403,21 @@ def main():
 
     # print('Runtime: ', runtime)
 
+<<<<<<< HEAD
     # with open('./res/AIDS/pred_geds.npy', 'wb') as file:
     #     np.save(file, pred_geds)
     
     # pred_matrix = pred_geds[560:, :560]
     # # pred_matrix = distance_matrix[560:, :560]
     # true_matrix = ged_matrix[560:, :560]
+=======
+    with open('./res/LINUX/pred_geds.npy', 'wb') as file:
+        np.save(file, pred_geds)
+    
+    pred_matrix = pred_geds[560:, :560]
+    # pred_matrix = distance_matrix[1200:, :1200]
+    true_matrix = ged_matrix[1200:, :1200]
+>>>>>>> 63121d9 (improvements)
 
     # rho, tau, p_at_k = compute_rank_correlations(pred_matrix, true_matrix, k=10)
 
@@ -414,6 +426,7 @@ def main():
     # print(p_at_k)
 
     # AIDS 21669590, LINUX 21669612, IMDB 21669624
+
 
 
 

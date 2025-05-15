@@ -137,7 +137,7 @@ def main():
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
-    alpha_layer = AlphaPermutationLayer(perm_pool, perm_matrices, embedding_dim, 64 * 4)
+    alpha_layer = AlphaPermutationLayer(perm_pool, perm_matrices, embedding_dim)
 
     criterion = SoftGEDLoss()
 
@@ -192,34 +192,32 @@ def main():
     with torch.no_grad():
         for batch in loader:
 
-            batch1, batch2, ged_labels = batch
-            batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
+                batch1, batch2, _ = batch
+                batch1, batch2 = batch1.to(device), batch2.to(device)
 
-            n_nodes_1 = batch1.batch.bincount()
-            n_nodes_2 = batch2.batch.bincount()
+                n_nodes_1 = batch1.batch.bincount()
+                n_nodes_2 = batch2.batch.bincount()
 
-            normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
+                node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
+                node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-            node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
-            node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
+                cost_matrices = compute_graphwise_node_distances(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+                padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
-            cost_matrices = compute_graphwise_node_distances(node_repr_b1, batch1, node_repr_b2, batch2)
-            padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+                soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-            soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+                row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+                col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
-            row_masks = get_node_masks(batch1, max_graph_size).to(soft_assignments.device)
-            col_masks = get_node_masks(batch2, max_graph_size).to(soft_assignments.device)
+                assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 
-            assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
+                soft_assignments = soft_assignments * assignment_mask
 
-            soft_assignments = soft_assignments * assignment_mask
-
-            row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-            soft_assignments = soft_assignments / row_sums
-            
-            predicted_ged = criterion(padded_cost_matrices, soft_assignments)
-            print(predicted_ged)
+                row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+                soft_assignments = soft_assignments / row_sums
+                
+                predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+                print(predicted_ged)
 
     plot_assignments_and_alphas(20, 607, soft_assignments[0], alphas[0].cpu().numpy())
     plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())
