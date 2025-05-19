@@ -36,7 +36,7 @@ from diff_birkhoff import PermutationPool, \
                           TripletLoss
 
 
-def train_triplet_network(loader, encoder, device, epochs=1001):
+def train_triplet_network(loader, encoder, device, epochs=1):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -311,8 +311,8 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
 def main():
 
-    train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
-    test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
+    train_dataset = GEDDataset(root='data/datasets/IMDBMulti', name='IMDBMulti', train=True) # 560, 800, 1200
+    test_dataset = GEDDataset(root='data/datasets/IMDBMulti', name='IMDBMulti', train=False)
 
     if 'x' not in train_dataset[0]:
         train_dataset.transform = Constant(value=1.0)
@@ -367,8 +367,8 @@ def main():
     # sizes = get_sampled_cost_matrix_sizes(dataset)
     p = int(len(train_dataset) * 0.25)
 
-    triplet_train = TripletNoLabelDataset(dataset, train_dataset_indices, ged_dict, k=p)
-    triplet_loader = DataLoader(triplet_train, batch_size=64 * 12, shuffle=True, num_workers=0)
+    triplet_train = TripletNoLabelDataset(dataset, train_dataset_indices, ged_dict, k=100)
+    triplet_loader = DataLoader(triplet_train, batch_size=len(triplet_train), shuffle=True, num_workers=0)
 
     siamese_train = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='train', train_indices=train_dataset_indices)
     siamese_val = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='val', train_indices=train_dataset_indices, val_indices=val_dataset_indices)
@@ -403,12 +403,12 @@ def main():
 
     # print('Runtime: ', runtime)
 
-    # with open('./res/AIDS/pred_geds.npy', 'wb') as file:
-    #     np.save(file, pred_geds)
+    with open('./res/LINUX/pred_geds.npy', 'wb') as file:
+        np.save(file, pred_geds)
     
-    # pred_matrix = pred_geds[560:, :560]
-    # # pred_matrix = distance_matrix[560:, :560]
-    # true_matrix = ged_matrix[560:, :560]
+    pred_matrix = pred_geds[560:, :560]
+    # pred_matrix = distance_matrix[1200:, :1200]
+    true_matrix = ged_matrix[1200:, :1200]
 
     # rho, tau, p_at_k = compute_rank_correlations(pred_matrix, true_matrix, k=10)
 
