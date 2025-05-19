@@ -103,13 +103,13 @@ class AlphaPermutationLayer(nn.Module):
         dim = embedding_dim * 2
         self.alpha_mlp = nn.Sequential(
             nn.Dropout(0.4),
-            nn.Linear(2 * embedding_dim, dim * 2),
+            nn.Linear(dim, dim * 2),
             nn.ReLU(),
             nn.LayerNorm(dim * 2),
             nn.Dropout(0.4),
-            nn.Linear(dim * 2, 2 * embedding_dim),
+            nn.Linear(dim * 2, dim),
             nn.ReLU(),
-            nn.Linear(2 * embedding_dim, self.k)
+            nn.Linear(dim, self.k)
         )
 
     def get_alpha_weights(self):

@@ -174,8 +174,8 @@ def plot_ged(test_preds, distance_matrix, test_data_indices, train_data_indices)
 
 def plot_assignments(idx1, idx2, soft_assignment):
     # dataset = TUDataset(root='data', name='MUTAG')
-    train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
-    test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
+    train_dataset = GEDDataset(root='data/datasets/IMDBMulti', name='IMDBMulti', train=True)
+    test_dataset = GEDDataset(root='data/datasets/IMDBMulti', name='IMDBMulti', train=False)
     dataset = ConcatDataset([train_dataset, test_dataset])
     
     g1 = dataset[idx1]
@@ -211,8 +211,8 @@ def plot_assignments(idx1, idx2, soft_assignment):
                 ax.plot(x_vals, y_vals, color='red', alpha=weight, linewidth=2*weight)
 
     plt.axis('off')
-    plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}.png', dpi=1000)
-    # plt.show()
+    # plt.savefig(f'./res/MUTAG/assignments_{idx1}_{idx2}.png', dpi=1000)
+    plt.show()
 
 
 def knn_classifier(distance_matrix, train_idx, test_idx, dataset_name):

@@ -35,7 +35,7 @@ from diff_birkhoff import PermutationPool, \
                           TripletLoss
 
 
-def train_triplet_network(loader, encoder, device, epochs=501):
+def train_triplet_network(loader, encoder, device, epochs=1001):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -77,7 +77,7 @@ def train_triplet_network(loader, encoder, device, epochs=501):
     torch.save({
         'encoder': encoder.state_dict(),
         'optimizer': optimizer.state_dict(),
-    }, './res/AIDS/checkpoint_encoder.pth')
+    }, './res/AIDS/checkpoint_encoder_entropy.pth')
 
     return encoder
 
@@ -164,10 +164,17 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
 
         soft_assignments = soft_assignments * assignment_mask
 
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
+
         predicted_ged = criterion(padded_cost_matrices, soft_assignments) # (B,)
         normalized_predicted_ged = predicted_ged / normalization_factor
 
         loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
+
+        # Entropy regularization
+        # entropy = -torch.sum(alphas * torch.log(alphas.clamp(1e-8)), dim=1).mean()
+        # loss = mse_loss + 0.1 * entropy
 
         loss.backward()
         optimizer.step()
@@ -206,6 +213,9 @@ def eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size
         assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
 
         soft_assignments = soft_assignments * assignment_mask
+
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
@@ -253,6 +263,9 @@ def test_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_siz
 
         soft_assignments = soft_assignments * assignment_mask
 
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
+
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
 
@@ -279,24 +292,24 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
         train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size)
 
-        if epoch % 1 == 0:
+        if epoch % 100 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
-    average_test_loss = test_ged(test_loader, encoder, alpha_layer,criterion, device, max_graph_size)
-    print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+    # average_test_loss = test_ged(test_loader, encoder, alpha_layer,criterion, device, max_graph_size)
+    # print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
     torch.save({
         'alpha_layer': alpha_layer.state_dict(),
         'optimizer': optimizer.state_dict(),
         'criterion': criterion.state_dict(),
-    }, './res/AIDS/checkpoint_ged.pth')
+    }, './res/AIDS/checkpoint_ged_entropy.pth')
 
 
 def main():
 
-    train_dataset = GEDDataset(root='data/datasets/LINUX', name='LINUX', train=True)
-    test_dataset = GEDDataset(root='data/datasets/LINUX', name='LINUX', train=False)
+    train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
+    test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
 
     if 'x' not in train_dataset[0]:
         train_dataset.transform = Constant(value=1.0)
@@ -304,6 +317,18 @@ def main():
     
     dataset = ConcatDataset([train_dataset, test_dataset])
     
+    # import matplotlib.pyplot as plt
+    # import networkx as nx
+    # from torch_geometric.utils import to_networkx
+    # for i in range(0, len(dataset), 10):
+    #     g = dataset[i]
+    #     G = to_networkx(g, to_undirected=True)
+    #     node_labels = g.x.argmax(dim=1).numpy()
+    #     pos = nx.kamada_kawai_layout(G)
+    #     nx.draw(G, pos=pos, edge_color='gray', with_labels=False)
+    #     plt.savefig(f'./data/datasets/imgs_imdb/graph_{i}.png')
+    #     plt.close()
+
     num_features = train_dataset.num_features
 
     ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
@@ -337,22 +362,23 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # sizes = get_sampled_cost_matrix_sizes(dataset)
+    p = int(len(train_dataset) * 0.25)
 
-    triplet_train = TripletNoLabelDataset(dataset, train_dataset_indices, ged_dict, k=100)
-    triplet_loader = DataLoader(triplet_train, batch_size=64 * 12, shuffle=True, num_workers=2)
+    triplet_train = TripletNoLabelDataset(dataset, train_dataset_indices, ged_dict, k=p)
+    triplet_loader = DataLoader(triplet_train, batch_size=64 * 12, shuffle=True, num_workers=0)
 
     siamese_train = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='train', train_indices=train_dataset_indices)
     siamese_val = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='val', train_indices=train_dataset_indices, val_indices=val_dataset_indices)
     siamese_test = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='test', train_indices=train_dataset_indices, test_indices=test_dataset.i)
     siamese_all = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='all', train_indices=train_dataset_indices, test_indices=test_dataset.i)
 
-    siamese_train_loader = DataLoader(siamese_train, batch_size=64 * 4, shuffle=True, num_workers=2)
-    siamese_val_loader = DataLoader(siamese_val, batch_size=64 * 4, shuffle=False, num_workers=2)
-    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 12, shuffle=False, num_workers=2)
-    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 32, shuffle=False, num_workers=2)
+    siamese_train_loader = DataLoader(siamese_train, batch_size=64 * 4, shuffle=True, num_workers=0)
+    siamese_val_loader = DataLoader(siamese_val, batch_size=64 * 4, shuffle=False, num_workers=0)
+    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 12, shuffle=False, num_workers=0)
+    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 32, shuffle=False, num_workers=0)
 
     embedding_dim = 64
-    encoder = Model(num_features, embedding_dim, 3).to(device)
+    encoder = Model(num_features, embedding_dim, 1).to(device)
 
     encoder = train_triplet_network(triplet_loader, encoder, device)
     encoder.freeze_params(encoder) # you should not only freeze, but checkpoint the model as well
@@ -370,22 +396,24 @@ def main():
 
     train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, criterion, device, max_graph_size)
 
-    pred_geds, runtime = extract_ged(siamese_all_loader, encoder, alpha_layer, criterion, device, max_graph_size, len(dataset))
+    # pred_geds, runtime = extract_ged(siamese_all_loader, encoder, alpha_layer, criterion, device, max_graph_size, len(dataset))
 
-    print('Runtime: ', runtime)
+    # print('Runtime: ', runtime)
 
-    with open('./res/AIDS/pred_geds.npy', 'wb') as file:
-        np.save(file, pred_geds)
+    # with open('./res/AIDS/pred_geds.npy', 'wb') as file:
+    #     np.save(file, pred_geds)
     
-    pred_matrix = pred_geds[560:, :560]
-    # pred_matrix = distance_matrix[560:, :560]
-    true_matrix = ged_matrix[560:, :560]
+    # pred_matrix = pred_geds[560:, :560]
+    # # pred_matrix = distance_matrix[560:, :560]
+    # true_matrix = ged_matrix[560:, :560]
 
-    rho, tau, p_at_k = compute_rank_correlations(pred_matrix, true_matrix, k=10)
+    # rho, tau, p_at_k = compute_rank_correlations(pred_matrix, true_matrix, k=10)
 
-    print(rho)
-    print(tau)
-    print(p_at_k)
+    # print(rho)
+    # print(tau)
+    # print(p_at_k)
+
+    # AIDS 21669590, LINUX 21669612, IMDB 21669624
 
 
 

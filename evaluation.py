@@ -11,6 +11,7 @@ from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset, GEDDataset
 from torch_geometric.utils import to_networkx
+from torch_geometric.transforms import Constant
 
 from utils import compute_graphwise_node_distances, pad_cost_matrices, get_node_masks
 
@@ -49,6 +50,11 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas):
     # Load dataset
     train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
     test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
+
+    if 'x' not in train_dataset[0]:
+        train_dataset.transform = Constant(value=1.0)
+        test_dataset.transform = Constant(value=1.0)
+    
     dataset = ConcatDataset([train_dataset, test_dataset])
 
     g1 = dataset[idx1]
@@ -80,10 +86,10 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas):
     for i in range(len(G1.nodes)):
         for j in range(len(G2.nodes)):
             weight = soft_assignment[i, j]
-            if weight >= 0.1:
-                x_vals = [pos1[i][0], pos2[j][0]]
-                y_vals = [pos1[i][1], pos2[j][1]]
-                ax1.plot(x_vals, y_vals, color='red', alpha=float(weight), linewidth=2 * float(weight))
+            # if weight >= 0.1:
+            x_vals = [pos1[i][0], pos2[j][0]]
+            y_vals = [pos1[i][1], pos2[j][1]]
+            ax1.plot(x_vals, y_vals, color='red', alpha=float(weight), linewidth=2 * float(weight))
 
     ax1.set_title("Soft Assignments")
     ax1.axis('off')
@@ -92,12 +98,13 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas):
     ax2.bar(range(len(alphas)), alphas)
     ax2.set_title("Alpha Distribution")
     ax2.set_xlabel("Alpha - Permutation Matrix Index")
-    ax2.set_xticks(range(len(alphas)), range(len(alphas)), rotation=45)
+    ax2.set_xticks(range(0, len(alphas), 2), range(0, len(alphas), 2), rotation=90)
     ax2.set_ylabel("Alpha Weight")
+    ax2.set_ylim(0.0, 1.0)
 
     plt.tight_layout()
-    plt.savefig(f'./res/AIDS/combined_assignments_{idx1}_{idx2}.png', dpi=600)
-    plt.show()
+    plt.savefig(f'./res/AIDS/combined_assignments_{idx1}_{idx2}.png', dpi=800)
+    # plt.show()
 
 
 def main():
@@ -105,6 +112,12 @@ def main():
     # Load dataset
     train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
     test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
+
+    print(train_dataset.ged[20, 607], ' ', train_dataset.ged[20, 562], ' ', train_dataset.ged[20, 611])
+
+    if 'x' not in train_dataset[0]:
+        train_dataset.transform = Constant(value=1.0)
+        test_dataset.transform = Constant(value=1.0)
 
     dataset = ConcatDataset([train_dataset, test_dataset])
 
@@ -114,7 +127,7 @@ def main():
 
     # Load models
     embedding_dim = 64
-    encoder = Model(num_features, embedding_dim, 3)
+    encoder = Model(num_features, embedding_dim, 1)
     encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
 
     max_graph_size = max([g.num_nodes for g in dataset])
@@ -134,13 +147,13 @@ def main():
         weight_decay=1e-5
     )
 
-    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder.pth', map_location=device)
+    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_new.pth', map_location=device)
     encoder.load_state_dict(checkpoint_encoder['encoder'])
     encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
 
     encoder = encoder.to(device)
 
-    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged.pth', map_location=device)
+    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_new.pth', map_location=device)
     alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
     ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
     criterion.load_state_dict(checkpoint_ged['criterion'])
@@ -153,7 +166,10 @@ def main():
     criterion.eval()
 
     # Select graphs
-    indices = [20, 607, 628, 562] # G0, G1 similar, G2 similar, G3 dissimilar
+    indices = [20, 607, 562, 611] # G0, G1 similar, G2 less similar, G3 dissimilar
+    # indices = [20, 560, 570, 604]
+    # indices = [6, 7, 13, 17]
+    # indices = [10, 1230, 1, 1]
     selected_graphs = [dataset[i] for i in indices]
 
     G0 = selected_graphs[0]
@@ -205,7 +221,11 @@ def main():
             predicted_ged = criterion(padded_cost_matrices, soft_assignments)
             print(predicted_ged)
 
-    plot_assignments_and_alphas(20, 562, soft_assignments[2], alphas[2].cpu().numpy())
+    plot_assignments_and_alphas(20, 607, soft_assignments[0], alphas[0].cpu().numpy())
+    plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())
+    plot_assignments_and_alphas(20, 611, soft_assignments[2], alphas[2].cpu().numpy())
+    
+    # plot_assignments_and_alphas(10, 1230, soft_assignments[0], alphas[0].cpu().numpy())
 
 
 if __name__ == '__main__':
