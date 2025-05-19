@@ -375,10 +375,10 @@ def main():
     siamese_test = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='test', train_indices=train_dataset_indices, test_indices=test_dataset.i)
     siamese_all = SiameseNoLabelDataset(dataset, norm_ged_matrix, pair_mode='all', train_indices=train_dataset_indices, test_indices=test_dataset.i)
 
-    siamese_train_loader = DataLoader(siamese_train, batch_size=64 * 4, shuffle=True, num_workers=0)
-    siamese_val_loader = DataLoader(siamese_val, batch_size=64 * 4, shuffle=False, num_workers=0)
-    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 12, shuffle=False, num_workers=0)
-    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 32, shuffle=False, num_workers=0)
+    siamese_train_loader = DataLoader(siamese_train, batch_size=len(siamese_train), shuffle=True, num_workers=0)
+    siamese_val_loader = DataLoader(siamese_val, batch_size=len(siamese_val), shuffle=False, num_workers=0)
+    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 192, shuffle=False, num_workers=10)
+    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 384, shuffle=False, num_workers=10)
 
     embedding_dim = 64
     encoder = Model(num_features, embedding_dim, 1).to(device)
@@ -403,21 +403,12 @@ def main():
 
     # print('Runtime: ', runtime)
 
-<<<<<<< HEAD
     # with open('./res/AIDS/pred_geds.npy', 'wb') as file:
     #     np.save(file, pred_geds)
     
     # pred_matrix = pred_geds[560:, :560]
     # # pred_matrix = distance_matrix[560:, :560]
     # true_matrix = ged_matrix[560:, :560]
-=======
-    with open('./res/LINUX/pred_geds.npy', 'wb') as file:
-        np.save(file, pred_geds)
-    
-    pred_matrix = pred_geds[560:, :560]
-    # pred_matrix = distance_matrix[1200:, :1200]
-    true_matrix = ged_matrix[1200:, :1200]
->>>>>>> 63121d9 (improvements)
 
     # rho, tau, p_at_k = compute_rank_correlations(pred_matrix, true_matrix, k=10)
 
