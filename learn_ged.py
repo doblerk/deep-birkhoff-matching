@@ -341,3 +341,162 @@ https://github.com/Sangs3112/SimGNN/blob/master/README_en.md
 https://github.com/yunshengb/SimGNN
 https://www.nature.com/articles/s44335-025-00026-4
 """
+
+class PermutationPool:
+    def __init__(self, max_n, k, seed: int = 42):
+        """
+        Args:
+            max_n (int): Maximum graph size (i.e., full matrix size: max_n x max_n)
+            k (int): Number of permutation matrices to generate
+            size_data (np.ndarray): Array of shape (N, 2) containing historical (n, m) size pairs
+            seed (int): RNG seed for reproducibility
+        """
+        self.rng = np.random.default_rng(seed)
+        self.max_n = max_n
+        self.k = k
+        # self.size_data = size_data
+        # self.kde = gaussian_kde(size_data.T)
+        self.perm_vectors = self._generate_permutation_vectors()
+    
+    def _sample_size(self):
+        """Sample a (n, m) pair from the empirical KDE distribution."""
+        while True:
+            sample = np.round(self.kde.resample(1, seed=self.rng)).astype(int).flatten()
+            n, m = sample
+            if 1 <= n <= self.max_n and 1 <= m <= self.max_n:
+                return n, m
+
+    def _generate_permutation_vectors(self):
+        """Generate permutation vectors of max_n length, padded/embedded."""
+        perms = []
+
+        identity = np.arange(self.max_n)
+        perms.append(tuple(identity))
+
+        for _ in range(self.k - 1):
+            # n, m = self._sample_size()
+            # perm_len = min(n, m)
+            # perm = self.rng.permutation(perm_len)
+            # vector = -1 * np.ones(self.max_n, dtype=int)
+            # vector[:perm_len] = perm
+            # perms.append(tuple(vector))
+            perms.append(tuple(self.rng.permutation(self.max_n)))
+
+        return torch.tensor(perms, dtype=torch.long)
+
+class LearnablePaddingAttention(nn.Module):
+
+    def __init__(self, max_graph_size):
+        super(LearnablePaddingAttention, self).__init__()
+        self.max_graph_size = max_graph_size
+        self.attention_logits = nn.Parameter(torch.randn(max_graph_size, max_graph_size))
+    
+    def forward(self, cost_matrices):
+        attention_weights = torch.sigmoid(self.attention_logits)
+        attention_weights = attention_weights.unsqueeze(0).to(cost_matrices.device)
+        # weighted_cost = cost_matrices * attention_weights
+        return cost_matrices * attention_weights
+
+
+class TripletDataset(Dataset):
+
+    def __init__(self, graphs, indices, ged_labels):
+        super(TripletDataset, self).__init__()
+        self.graphs = graphs
+        self.indices = indices
+        self.ged_labels = ged_labels
+        self.labels = [g.y.item() for g in graphs]
+    
+    def __len__(self):
+        return len(self.indices)
+
+    def _get_ged(self, i, j):
+        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
+  
+    def __getitem__(self, idx):
+        anchor_idx = self.indices[idx]
+        anchor_graph = self.graphs[anchor_idx]
+        anchor_label = self.labels[anchor_idx]
+
+        same_class = []
+        diff_class = []
+        for j in self.indices:
+            if j == anchor_idx:
+                continue
+            elif self.labels[j] == anchor_label:
+                same_class.append((j, self._get_ged(anchor_idx, j)))
+            else:
+                diff_class.append((j, self._get_ged(anchor_idx, j)))
+
+        # Hard positive = same class, max GED
+        pos_graph_idx, _ = max(same_class, key=lambda x: x[1])
+        # Hard negative = different class, min GED
+        neg_graph_idx, _ = min(diff_class, key=lambda x: x[1])
+
+        pos_graph = self.graphs[pos_graph_idx]
+        neg_graph = self.graphs[neg_graph_idx]
+
+        return anchor_graph, pos_graph, neg_graph
+
+
+class SiameseDataset(Dataset):
+
+    def __init__(
+            self,
+            graphs,
+            ged_labels,
+            pair_mode='train', # 'train', 'cross', 'all'
+            train_indices=None,
+            test_indices=None,    
+    ):
+        super(SiameseDataset, self).__init__()
+        self.graphs = graphs
+        self.ged_labels = ged_labels
+        self.pair_mode = pair_mode
+
+        if pair_mode == 'train':
+            assert train_indices is not None
+            self.train_indices = train_indices
+            self.pairs = None
+        
+        elif pair_mode == 'test':
+            assert test_indices is not None
+            self.pairs = list(combinations(test_indices, r=2))
+        
+        elif pair_mode == 'all':
+            assert train_indices is not None and test_indices is not None
+            total_indices = sorted(train_indices + test_indices)
+            self.pairs = list(combinations(total_indices, r=2))
+        
+        else:
+            raise ValueError(f'Unknown pair_mode: {pair_mode}')
+    
+    def _get_ged(self, i, j):
+        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
+    
+    def __len__(self):
+        if self.pair_mode == 'train':
+            return len(self.train_indices)
+        else:
+            return len(self.pairs)
+
+    def __getitem__(self, idx):
+        if self.pair_mode == 'train':
+            idx1 = self.train_indices[idx]
+            idx2 = int(np.random.choice(self.train_indices))
+        else:
+            idx1, idx2 = self.pairs[idx]
+        
+        g1, g2 = self.graphs[idx1], self.graphs[idx2]
+
+        # Order graphs consistently
+        if g1.num_nodes > g2.num_nodes:
+            g1, g2 = g2, g1
+        
+        ged = self._get_ged(idx1, idx2)
+        normalized_ged =  ged / (0.5 * (g1.num_nodes + g2.num_nodes))
+
+        if self.pair_mode == 'all':
+            return g1, g2, torch.tensor(normalized_ged, dtype=torch.float), idx1, idx2
+        else:
+            return g1, g2, torch.tensor(normalized_ged, dtype=torch.float)

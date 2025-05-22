@@ -1,0 +1,260 @@
+import argparse
+
+import torch
+import numpy as np
+import torch.nn.functional as F
+
+from torch.utils.data import random_split, ConcatDataset
+from torch_geometric.loader import DataLoader
+from torch_geometric.datasets import GEDDataset
+from torch_geometric.transforms import Constant
+
+from tribiged.datasets.siamese_dataset import SiameseDataset
+from tribiged.datasets.triplet_dataset import TripletDataset
+from tribiged.models.gnn_models import Model
+from tribiged.losses.triplet_loss import TripletLoss
+from tribiged.losses.ged_loss import GEDLoss
+from tribiged.utils.permutation import PermutationPool
+from tribiged.models.alpha_layers import AlphaPermutationLayer
+from tribiged.utils.data_utils import ged_matrix_to_dict, \
+                                      compute_cost_matrices, \
+                                      pad_cost_matrices, \
+                                      get_node_masks
+
+
+def train_triplet_network(loader, encoder, device, args, epochs=1001):
+    encoder.train()
+    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
+    criterion = TripletLoss(margin=0.2)
+    
+    for epoch in range(epochs):
+
+        total_loss = 0
+        total_samples = 0
+
+        for triplet in loader:
+
+            anchor_graphs, pos_graphs, neg_graphs = triplet
+
+            a_batch = anchor_graphs.to(device)
+            p_batch = pos_graphs.to(device)
+            n_batch = neg_graphs.to(device)
+
+            optimizer.zero_grad()
+
+            _, a_graph_emb = encoder(a_batch.x, a_batch.edge_index, a_batch.batch)
+            _, p_graph_emb = encoder(p_batch.x, p_batch.edge_index, p_batch.batch)
+            _, n_graph_emb = encoder(n_batch.x, n_batch.edge_index, n_batch.batch)
+
+            loss = criterion(a_graph_emb, p_graph_emb, n_graph_emb)
+
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * anchor_graphs.i.size(0)
+            total_samples += anchor_graphs.i.size(0)
+
+        average_loss = total_loss / total_samples
+        
+        if epoch % 10 == 0:
+            print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
+    
+    torch.save({
+        'encoder': encoder.state_dict(),
+        'optimizer': optimizer.state_dict(),
+    }, f'{args.output_dir}/checkpoint_encoder_entropy.pth')
+
+    return encoder
+
+
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, criterion, device, max_graph_size, args, epochs=1001):
+    encoder.eval()
+
+    optimizer = torch.optim.Adam(
+        list(alpha_layer.parameters()) + list(criterion.parameters()),
+        lr=1e-3, 
+        weight_decay=1e-5
+    )
+    
+    for epoch in range(epochs):
+
+        train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size)
+
+        if epoch % 10 == 0:
+            average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
+            print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+
+    average_test_loss = eval_ged(test_loader, encoder, alpha_layer,criterion, device, max_graph_size)
+    print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+
+    torch.save({
+        'alpha_layer': alpha_layer.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'criterion': criterion.state_dict(),
+    }, f'{args.output_dir}/checkpoint_ged_entropy.pth')
+
+
+def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size):
+    alpha_layer.train()
+    criterion.train()
+
+    for batch in train_loader:
+
+        batch1, batch2, ged_labels = batch
+
+        batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
+
+        n_nodes_1 = batch1.batch.bincount()
+        n_nodes_2 = batch2.batch.bincount()
+
+        normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
+
+        optimizer.zero_grad()
+
+        with torch.no_grad():
+            node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
+            node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
+        
+        cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+
+        padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+
+        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        
+        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
+
+        assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
+
+        soft_assignments = soft_assignments * assignment_mask
+
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
+
+        predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        normalized_predicted_ged = predicted_ged / normalization_factor
+
+        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
+
+        loss.backward()
+        optimizer.step()
+
+
+@torch.no_grad()
+def eval_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size):
+    alpha_layer.eval()
+    criterion.eval()
+
+    total_loss = 0.0
+    total_samples = 0
+
+    for batch in loader:
+
+        batch1, batch2, ged_labels = batch
+        batch1, batch2, ged_labels = batch1.to(device), batch2.to(device), ged_labels.to(device)
+
+        n_nodes_1 = batch1.batch.bincount()
+        n_nodes_2 = batch2.batch.bincount()
+
+        normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
+
+        node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
+        node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
+
+        cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+
+        padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+
+        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+
+        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
+
+        assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
+
+        soft_assignments = soft_assignments * assignment_mask
+
+        row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / row_sums
+
+        predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        normalized_predicted_ged = predicted_ged / normalization_factor
+
+        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
+
+        total_loss += loss.item() * ged_labels.size(0)
+        total_samples += ged_labels.size(0)
+
+    return total_loss / total_samples
+
+
+def get_args_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, help='Dataset name')
+    parser.add_argument('--output_dir', type=str, help='Path to output directory')
+    parser.add_argument('--k', type=int, default=21, help='Number of generated permutation matrices')
+    return parser
+
+
+def main(args):
+
+    train_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=True)
+    test_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=False)
+
+    if 'x' not in train_dataset[0]:
+        train_dataset.transform = Constant(value=1.0)
+        test_dataset.transform = Constant(value=1.0)
+    
+    dataset = ConcatDataset([train_dataset, test_dataset])
+
+    num_features = train_dataset.num_features
+
+    ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
+
+    train_size = int(0.75 * len(train_dataset))
+    val_size = len(train_dataset) - train_size
+    
+    generator = torch.Generator().manual_seed(42)
+    train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size], generator=generator)
+    train_dataset_indices, val_dataset_indices = sorted(train_dataset.indices), sorted(val_dataset.indices)
+
+    ged_dict = ged_matrix_to_dict(ged_matrix)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    p = int(len(train_dataset) * 0.25)
+
+    triplet_train = TripletDataset(dataset, train_dataset_indices, ged_dict, k=p)
+    triplet_loader = DataLoader(triplet_train, batch_size=len(triplet_train), shuffle=True, num_workers=0)
+
+    siamese_train = SiameseDataset(dataset, norm_ged_matrix, pair_mode='train', train_indices=train_dataset_indices)
+    siamese_val = SiameseDataset(dataset, norm_ged_matrix, pair_mode='val', train_indices=train_dataset_indices, val_indices=val_dataset_indices)
+    siamese_test = SiameseDataset(dataset, norm_ged_matrix, pair_mode='test', train_indices=train_dataset_indices, test_indices=test_dataset.i)
+
+    siamese_train_loader = DataLoader(siamese_train, batch_size=len(siamese_train), shuffle=True, num_workers=0)
+    siamese_val_loader = DataLoader(siamese_val, batch_size=len(siamese_val), shuffle=False, num_workers=0)
+    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 192, shuffle=False, num_workers=10)
+
+    embedding_dim = 64
+    encoder = Model(num_features, embedding_dim, 1).to(device)
+
+    encoder = train_triplet_network(triplet_loader, encoder, device, args)
+    encoder.freeze_params(encoder)
+
+    max_graph_size = max([g.num_nodes for g in dataset])
+    k = args.k
+
+    perm_pool = PermutationPool(max_n=max_graph_size, k=k)
+    perm_matrices = perm_pool.get_matrix_batch().to(device)
+
+    alpha_layer = AlphaPermutationLayer(perm_matrices, k, embedding_dim).to(device)
+
+    criterion = GEDLoss().to(device)
+
+    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, criterion, device, max_graph_size, args)
+
+
+if __name__ == '__main__':
+    parser = get_args_parser()
+    args = parser.parse_args()
+    main(args)
