@@ -133,7 +133,7 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas, dataset, ou
     ax2.bar(range(len(alphas)), alphas)
     ax2.set_title("Alpha Distribution")
     ax2.set_xlabel("Alpha - Permutation Matrix Index")
-    ax2.set_xticks(range(0, len(alphas), 2), range(0, len(alphas), 2), rotation=90)
+    ax2.set_xticks(range(1, len(alphas) + 1, 2), range(1, len(alphas) + 1, 2), rotation=90)
     ax2.set_ylabel("Alpha Weight")
     ax2.set_ylim(0.0, 1.0)
 

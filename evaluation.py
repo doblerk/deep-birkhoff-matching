@@ -26,7 +26,6 @@ from diff_birkhoff import PermutationPool, \
                           TripletLoss
 
 
-
 class CustomGraphPairDataset(Dataset):
     def __init__(self, base_graph, other_graphs, norm_ged_matrix, base_idx, other_indices):
         self.base_graph = base_graph
@@ -95,10 +94,10 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas):
     ax1.axis('off')
 
     # --- Alpha Distribution ---
-    ax2.bar(range(len(alphas)), alphas)
+    ax2.bar(range(1, len(alphas) + 1), alphas)
     ax2.set_title("Alpha Distribution")
     ax2.set_xlabel("Alpha - Permutation Matrix Index")
-    ax2.set_xticks(range(0, len(alphas), 2), range(0, len(alphas), 2), rotation=90)
+    ax2.set_xticks(range(1, len(alphas) + 1, 2), range(1, len(alphas) + 1, 2), rotation=90)
     ax2.set_ylabel("Alpha Weight")
     ax2.set_ylim(0.0, 1.0)
 
@@ -220,7 +219,7 @@ def main():
                 print(predicted_ged)
 
     plot_assignments_and_alphas(20, 607, soft_assignments[0], alphas[0].cpu().numpy())
-    plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())
+    # plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())
     plot_assignments_and_alphas(20, 611, soft_assignments[2], alphas[2].cpu().numpy())
     
     # plot_assignments_and_alphas(10, 1230, soft_assignments[0], alphas[0].cpu().numpy())
