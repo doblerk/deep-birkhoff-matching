@@ -13,7 +13,8 @@ The goal is to research a novel GNN-based framework for approximating *Graph Edi
 
 ### Next Goals
 #### Explore adaptive permutation pool refinement.
-> - [ ] Prune underused permutation matrices + genetic algorithms.
+> - [ ] Prune underused permutation matrices.
+> - [ ] Apply a genetic-like algorithm to generate new permutation matrices.
 #### Address the handling of unequally size graphs.
 > - [ ] Integrate learnable insertion and deletion.
 #### Explore another type of edit-based formulation.

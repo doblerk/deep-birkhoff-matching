@@ -25,8 +25,19 @@ class AlphaPermutationLayer(nn.Module):
             nn.Linear(dim * 2, self.k)
         )
 
+        self.alpha_history = torch.zeros(self.k)
+
     def get_alpha_weights(self):
         return torch.softmax(self.alpha_logits / self.temperature, dim=1)
+    
+    def _update_alpha_history(self, alphas):
+        return self.alpha_history + alphas
+    
+    def _clear_alpha_history(self):
+        self.alpha_history[:] = 0.0
+    
+    def _rank_alpha(self):
+        pass
         
     def forward(self, graph_repr_b1, graph_repr_b2):
         pair_repr = torch.cat([graph_repr_b1, graph_repr_b2], dim=1)

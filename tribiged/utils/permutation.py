@@ -31,7 +31,49 @@ class PermutationPool:
     
     def get_vectors(self):
         return self.perm_vectors
+    
+    def _mate_permutations(self, alpha_weights):
+        ranking = torch.argsort(alpha_weights)
+        topk = alpha_weights[ranking][:2]
+        pass
 
+    def _partially_mapped_crossover(self, p1, p2):
+        size = len(p1)
+        c1, c2 = p1.clone(), p2.clone()
+
+        # Random crossover break points
+        bp1 = torch.randint(0, size - 1, (1,)).item()
+        bp2 = torch.randint(bp1 + 1, size, (1,)).item()
+
+        # Crossover segments
+        seg1 = p1[bp1:bp2]
+        seg2 = p2[bp1:bp2]
+
+        # Fill up mapping
+        self._fill_child(c1, seg1, seg2, size)
+        self._fill_child(c2, seg2, seg1, size)
+
+        # Exchange segments
+        c1[bp1:bp2 + 1] = seg2
+        c2[bp1:bp2 + 1] = seg1
+
+        return c1, c2
+    
+    def _resolve(self, value, seg_from, seg_to):
+        """Recursively resolve conflicts for a single value."""
+        if value in seg_to:
+            pos = (seg_to == value).nonzero(as_tuple=True)[0].item()
+            return self._resolve(seg_from[pos], seg_from, seg_to)
+        else:
+            return value
+
+    def _fill_child(self, c, seg_from, seg_to, size, idx=0):
+        if idx >= size:
+            return c
+        # If current gene is in the conflicting segment, resolve recursively
+        c[idx] = self._resolve(c[idx], seg_from, seg_to)
+        return self._fill_child(c, seg_from, seg_to, size, idx + 1)
+    
     def get_matrix_batch(self):
         """
         Returns a batch of k permutation matrices of shape (k, max_n, max_n)
