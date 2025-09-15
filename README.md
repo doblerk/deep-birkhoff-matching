@@ -1,42 +1,20 @@
-# Learning GED via Differentiable Permutation Matrix via Birkhoff Polytope Approximation
+# GNN-GED
 
-#### Questions and Remarks
-- Should we implement in the beginning a pre-generated set of permutation matrices?
-    - If yes, then we should get the size of the biggest graph(s) so that we can pad all cost matrices if necessary.
-    - If no, then we should generate permutation matrices on the fly.
-- For a cost matrix of size NxN, there are N! permutation matrices, but the size of the Birkhoff decomposition is guranteed to be at most N².
-    - Moreover, Carathéodory's Theorem states that any point in the convex hull (i.e., any DSM in the Birkhoff polytope) can be expressed as a convex combination of at most k + 1 extreme points (i.e., permutation matrices), where k is the size of the cost matrix. This implies we can compute a subset of k + 1 permutation matrices instead of computing N! permutation matrices. Since we only need k + 1 permutation matrices per graph pair, we can:
-        - Randomly sample k + 1 permutation matrices from the full set.
-        - Deterministically sample k + 1 permutation matrices from the hull set.
-    - We currently determine the size of the largest graph(s) in a batch and pad all cost matrices accordingly so that they are all square and of the same size.
-        - Could we generate permutation matrices on the fly instead?
-        - We re-initialize alpha weights everytime for different permutation matrices.
-            - Can we converge? Wouldn't it be better to compute a set of pre-generated permutation matrices so that we just have to learn weights for the same set of alphas?
-            - Should we implement an exponential moving average across batches to ensure smooth updates?
-- For the loss function, ground truths GED and predicted GED are not in the same order of magnitudes. Should we apply a transformation?
-- Currently, we randomly generate k+1 permutation matrices on the fly.
-    - Can we randomly generate k+1 or N permutation matrices at the very beginning so that we reuse the same throughout the whole training?
-        - Then, we can also vary N and see how this affects convergence and performance.
-- We obtain soft assignment matrix (DSM), but we may convert it into a hard assignment matrix (permutation).
-    - Take max values per row?
-    - Take the permutation matrix with highest alpha?
-- The scale of the cost matrix can increase with the dimensionality of the node embeddings, especially with squared Euclidean distance. This can distort GED or alignment loss and make it harder to compare across models.
-    - One solution is to normalize node embeddings before computing cost and rescale cost using cosine distance.
-    - One solution is to normalize the cost by the dimensionality to cancel out the expected growth from higher dimensions.
+## Description
+The goal is to research a novel GNN-based framework for approximating *Graph Edit Distance* (GED) computation in a fully differentiable manner. Rather than enforcing permutation-like matrices onto a continuous matrix via entropic regularization or iterative normalization, we start with valid permutations and learn how to weigh them meaningfully. This yields a convex combination of interpretable assignments, which resides within a subspace of the *Birkhoff polytope*.
 
-#### TODOs
-- [x] Implement a function to store ground truth labels as a dictionary -> constant lookup.
-- [x] Implement a function to compute cost matrices.
-- [x] Implement a function to sample permutation matrices.
-- [x] Implement a way to learn alpha weights.
-- [x] Implement a way to compute soft assignment matrices.
-- [x] Implement a way to compute the loss.
-- [x] Implement two different strategies to efficiently sample permutation matrices.
-- [ ] Explore adaptive pool refinement (e.g., replace worst-performing permutations periodically).
-- [ ] Investigate ensemble DSMs: learn separate alphas for structure vs features, then combine them.
-- [ ] Extend the framework to a self-supervised learning approach.
+## Roadmap
 
-#### Some References
+### Milestones
+#### 1. Two-stage framework for (1) learning discriminative node embeddings, and (2) learning convex combinations of permutation matrices.
+> - [x] Triplet Loss + Regression Loss.
+> - [x] GNN encoder + MLP.
+> - [x] Learnable scaling factor.
 
-- [ref](https://arxiv.org/pdf/2304.02458)
-- [ref](https://www.pragmatic.ml/sparse-sinkhorn-attention/)
+### Next Goals
+#### Explore adaptive permutation pool refinement.
+> - [ ] Prune underused permutation matrices + genetic algorithms.
+#### Address the handling of unequally size graphs.
+> - [ ] Integrate learnable insertion and deletion.
+#### Explore another type of edit-based formulation.
+> - [ ] Extend the framework to a self-supervised learning approach.
