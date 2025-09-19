@@ -11,7 +11,6 @@ class PermutationPool:
         Args:
             max_n (int): Maximum graph size (i.e., full matrix size: max_n x max_n)
             k (int): Number of permutation matrices to generate
-            size_data (np.ndarray): Array of shape (N, 2) containing historical (n, m) size pairs
             seed (int): RNG seed for reproducibility
         """
         self.rng = torch.Generator().manual_seed(seed) #np.random.default_rng(seed)
