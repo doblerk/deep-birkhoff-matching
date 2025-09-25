@@ -25,8 +25,6 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 
 
-
-
 def compute_cost_matrices(node_repr_b1, counts1, node_repr_b2, counts2):
     # Split node embeddings by graph
     b1_node_splits = torch.split(node_repr_b1, counts1.tolist())

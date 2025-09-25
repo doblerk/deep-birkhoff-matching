@@ -14,21 +14,18 @@ class PermutationPool:
             seed (int): RNG seed for reproducibility
         """
         self.rng = torch.Generator().manual_seed(seed) #np.random.default_rng(seed)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.max_n = max_n
         self.k = k
         self.perm_vectors = self._generate_permutation_vectors()
 
     def _generate_permutation_vectors(self) -> torch.Tensor:
         """Generate permutation vectors of max_n length, padded/embedded."""
-        # perms = [np.arange(self.max_n)]
-        # for _ in range(self.k - 1):
-        #     perms.append(self.rng.permutation(self.max_n))
-        # return torch.tensor(perms, dtype=torch.long)
-        perms = torch.zeros((self.k, self.max_n))
-        perms[0] = torch.arange(0, self.max_n)
+        perms = torch.zeros((self.k, self.max_n), dtype=torch.long)
+        perms[0] = torch.arange(0, self.max_n, dtype=torch.long)
         for i in range(1, self.k):
             perms[i] = torch.randperm(self.max_n, generator=self.rng)
-        perms = perms.to("cuda")
+        perms = perms.to(self.device)
         return perms
     
     def get_vectors(self) -> torch.Tensor:
@@ -65,7 +62,7 @@ class PermutationPool:
 
         return c1, c2
     
-    def _mate_permutations(self, worst_idx: torch.Tensor, best_idx: torch.Tensor) -> None:
+    def mate_permutations(self, worst_idx: torch.Tensor, best_idx: torch.Tensor) -> None:
         best1, best2 = self.perm_vectors[best_idx[0]], self.perm_vectors[best_idx[1]]
         c1, c2 = self._partially_mapped_crossover(best1, best2)
         self.perm_vectors[worst_idx[0]] = c1
@@ -76,10 +73,6 @@ class PermutationPool:
         Returns a batch of k permutation matrices of shape (k, max_n, max_n)
         One-hot encoded, inactive rows filled with zeros
         """
-        matrices = torch.zeros((self.k, self.max_n, self.max_n), dtype=torch.long, device="cuda")
-        # for idx, vec in enumerate(self.perm_vectors):
-        #     for i, j in enumerate(vec):
-        #         if j != -1:
-        #             matrices[idx, i, j] = 1.0
+        matrices = torch.zeros((self.k, self.max_n, self.max_n), dtype=torch.float32)
         matrices.scatter_(2, self.perm_vectors.unsqueeze(-1), 1.0)
         return matrices

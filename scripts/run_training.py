@@ -16,13 +16,14 @@ from tribiged.losses.triplet_loss import TripletLoss
 from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
 from tribiged.models.alpha_layers import AlphaPermutationLayer
+from tribiged.utils.train_utils import AlphaTracker
 from tribiged.utils.data_utils import ged_matrix_to_dict, \
                                       compute_cost_matrices, \
                                       pad_cost_matrices, \
                                       get_node_masks
 
 
-def train_triplet_network(loader, encoder, device, args, epochs=1001):
+def train_triplet_network(loader, encoder, device, args, epochs=11):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -67,7 +68,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, criterion, device, max_graph_size, args, epochs=1001):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, device, max_graph_size, args, epochs=21):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
@@ -78,7 +79,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     
     for epoch in range(epochs):
 
-        train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size)
+        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, criterion, optimizer, device, max_graph_size)
 
         if epoch % 10 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
@@ -94,7 +95,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     }, f'{args.output_dir}/checkpoint_ged_entropy.pth')
 
 
-def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, max_graph_size):
+def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, criterion, optimizer, device, max_graph_size):
     alpha_layer.train()
     criterion.train()
 
@@ -120,6 +121,7 @@ def train_ged(train_loader, encoder, alpha_layer, criterion, optimizer, device, 
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        sorted_idx, scores = alpha_tracker.update(alphas)
         
         row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
         col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
@@ -248,10 +250,11 @@ def main(args):
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
     alpha_layer = AlphaPermutationLayer(perm_matrices, k, embedding_dim).to(device)
+    alpha_tracker = AlphaTracker(k)
 
     criterion = GEDLoss().to(device)
 
-    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, criterion, device, max_graph_size, args)
+    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, device, max_graph_size, args)
 
 
 if __name__ == '__main__':
