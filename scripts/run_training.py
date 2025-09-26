@@ -23,7 +23,7 @@ from tribiged.utils.data_utils import ged_matrix_to_dict, \
                                       get_node_masks
 
 
-def train_triplet_network(loader, encoder, device, args, epochs=11):
+def train_triplet_network(loader, encoder, device, args, epochs=101):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -68,7 +68,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=11):
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, device, max_graph_size, args, epochs=21):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, device, max_graph_size, args, epochs=101):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
@@ -79,7 +79,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     
     for epoch in range(epochs):
 
-        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, criterion, optimizer, device, max_graph_size)
+        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, optimizer, device, max_graph_size)
 
         if epoch % 10 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
@@ -95,9 +95,11 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     }, f'{args.output_dir}/checkpoint_ged_entropy.pth')
 
 
-def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, criterion, optimizer, device, max_graph_size):
+def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, optimizer, device, max_graph_size):
     alpha_layer.train()
     criterion.train()
+
+    batch_alpha_accum = []
 
     for batch in train_loader:
 
@@ -121,7 +123,7 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, criterion, opti
         padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
-        sorted_idx, scores = alpha_tracker.update(alphas)
+        # batch_alpha_accum.append(alphas.detach().cpu())
         
         row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
         col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
@@ -134,12 +136,30 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, criterion, opti
         soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
-        normalized_predicted_ged = predicted_ged / normalization_factor
+        normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
-        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
+        entropy_loss = alpha_layer.entropy_loss(alphas)
+        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean') + 1e-3 * entropy_loss
 
         loss.backward()
         optimizer.step()
+
+    # batch_alpha_accum = torch.cat(batch_alpha_accum, dim=0)
+    # sorted_idx, scores = alpha_tracker.update(batch_alpha_accum)
+    
+    # if sorted_idx is not None:
+    #     worst_indices = sorted_idx[:2]
+    #     best_indices = sorted_idx[-2:]
+    #     perm_pool.mate_permutations(worst_indices, best_indices)
+
+        # freeze weights after pruning
+    #     alpha_layer.freeze_module()
+    
+    # freeze_counter = alpha_layer.get_freeze_counter()
+    # if freeze_counter > 0:
+    #     alpha_layer.update_counter()
+    #     if freeze_counter == 0:
+    #         alpha_layer.clear_counter()
 
 
 @torch.no_grad()
@@ -180,7 +200,7 @@ def eval_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size):
         soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(padded_cost_matrices, soft_assignments)
-        normalized_predicted_ged = predicted_ged / normalization_factor
+        normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
         loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
 
@@ -212,6 +232,7 @@ def main(args):
     num_features = train_dataset.num_features
 
     ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
+    norm_ged_matrix = torch.exp(-norm_ged_matrix) # convert into range (0, 1] ?
 
     train_size = int(0.75 * len(train_dataset))
     val_size = len(train_dataset) - train_size

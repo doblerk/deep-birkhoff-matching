@@ -63,6 +63,7 @@ class PermutationPool:
         return c1, c2
     
     def mate_permutations(self, worst_idx: torch.Tensor, best_idx: torch.Tensor) -> None:
+        # Replace the worst 2 perms by a combination of the best 2 perms
         best1, best2 = self.perm_vectors[best_idx[0]], self.perm_vectors[best_idx[1]]
         c1, c2 = self._partially_mapped_crossover(best1, best2)
         self.perm_vectors[worst_idx[0]] = c1

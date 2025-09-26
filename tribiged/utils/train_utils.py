@@ -7,7 +7,7 @@ from tribiged.utils.permutation import PermutationPool
 
 
 class AlphaTracker:
-    def __init__(self, k: int, warmup: int = 10, window: int = 10):
+    def __init__(self, k: int, warmup: int = 100, window: int = 50):
         self.k = k
         self.warmup = warmup
         self.window = window
@@ -25,7 +25,7 @@ class AlphaTracker:
             self.history.append(mean_alphas)
 
         # If window boundary is reached -> rank alphas, then reset
-        if self.epoch_in_window >= self.window:
+        if self.epoch_in_window == self.window:
             ranking = self._rank_alphas(top_m, strategy)
             self._reset()
             return ranking
@@ -61,10 +61,6 @@ class AlphaTracker:
         Rank alphas from most underused to most used.
         Stategy: "mean" | "freq" | "mean+freq"
         """
-        if self.epoch_total < self.warmup:
-            print(f"⏳ Warmup: {self.epoch_total}/{self.warmup} epochs, skipping ranking.")
-            return None, None
-
         mean_usage, freq_top = self._get_usage_stats(top_m=top_m)
         if mean_usage is None:
             return None, None
