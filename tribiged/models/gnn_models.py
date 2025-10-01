@@ -1,13 +1,14 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.nn import Linear, BatchNorm1d, ReLU, Dropout, Sequential
 from torch_geometric.nn import global_add_pool
 
 from tribiged.models.gnn_layers import GINLayer
+from tribiged.models.pooling_layers import AttentionPooling, DensePooling
 
 
-class Model(torch.nn.Module):
+class Model(nn.Module):
     """
     A class defining the Graph Isomorphism Network
 
@@ -20,8 +21,12 @@ class Model(torch.nn.Module):
     n_layers: int
         number of hidden layers
     """
-    def __init__(self, input_dim, hidden_dim, n_layers):
+    def __init__(self, input_dim, hidden_dim, n_layers, use_attention=False, attn_concat=True, num_heads=4):
         super().__init__()
+        self.hidden_dim = hidden_dim
+        self.use_attention = use_attention
+        self.attn_concat = attn_concat
+        self.num_heads = num_heads
 
         self.conv_layers = torch.nn.ModuleList()
 
@@ -29,16 +34,28 @@ class Model(torch.nn.Module):
                                 
         for _ in range(n_layers - 1):
             self.conv_layers.append(GINLayer(hidden_dim, hidden_dim))
-        
-        self.dense_layers = Sequential(
-            Linear(hidden_dim * n_layers, hidden_dim * n_layers),
-            BatchNorm1d(hidden_dim * n_layers),
-            ReLU(),
-            Dropout(p=0.2),
-            Linear(hidden_dim * n_layers, hidden_dim)
-        )
 
-        self.input_proj = Linear(input_dim, hidden_dim) if input_dim != hidden_dim else None
+        self.input_proj = nn.Linear(input_dim, hidden_dim) if input_dim != hidden_dim else None
+
+        if self.use_attention:
+            self.pooling = AttentionPooling(
+                input_dim=hidden_dim,
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                concat=attn_concat
+            )
+        else:
+            self.pooling = DensePooling(
+                hidden_dim=hidden_dim,
+                n_layers=n_layers,
+            )
+    
+    @property
+    def output_dim(self):
+        if self.attn_concat:
+            return self.hidden_dim * self.num_heads
+        else:
+            return self.hidden_dim
     
     def freeze_params(self, encoder):
         for param in encoder.parameters():
@@ -54,13 +71,12 @@ class Model(torch.nn.Module):
             x_residual = x
             node_embeddings.append(x)
         
-        graph_pooled = []
-        for embeddings in node_embeddings:
-            pooled = global_add_pool(embeddings, batch)
-            graph_pooled.append(pooled)
-        
-        h = torch.cat(graph_pooled, dim=1)
-
-        graph_embeddings = self.dense_layers(h)
+        if self.use_attention:
+            Z = node_embeddings[-1]
+            graph_embeddings = self.pooling(Z, batch)
+        else:
+            graph_pooled = [global_add_pool(h, batch) for h in node_embeddings]
+            h = torch.cat(graph_pooled, dim=1)
+            graph_embeddings = self.pooling(h)
 
         return node_embeddings[-1], graph_embeddings

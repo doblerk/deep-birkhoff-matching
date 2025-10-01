@@ -30,13 +30,15 @@ class AlphaBilinear(nn.Module):
     def __init__(self, input_dim, k):
         super().__init__()
         # One bilinear weight matrix per permutation
-        self.bilinear = nn.ModuleList([
-            nn.Bilinear(input_dim, input_dim, 1, bias=False)
-            for _ in range(k)
-        ])
+        self.bilinear = nn.Parameter(torch.randn(k, input_dim, input_dim))
     
     def forward(self, g1, g2):
-        scores = [b(g1, g2) for b in self.bilinear]
+        print(g1.shape)
+        scores = []
+        for i in range(self.bilinear.shape[0]):
+            W = self.bilinear[i]
+            score = torch.sum((g1 @ W) * g2, dim=-1, keepdim=True)
+            scores.append(score)
         return torch.cat(scores, dim=-1)
 
 

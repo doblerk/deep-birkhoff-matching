@@ -15,7 +15,7 @@ from tribiged.models.gnn_models import Model
 from tribiged.losses.triplet_loss import TripletLoss
 from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
-from tribiged.models.alpha_layers import AlphaPermutationLayer
+from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear
 from tribiged.utils.train_utils import AlphaTracker
 from tribiged.utils.data_utils import ged_matrix_to_dict, \
                                       compute_cost_matrices, \
@@ -85,7 +85,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
-    average_test_loss = eval_ged(test_loader, encoder, alpha_layer,criterion, device, max_graph_size)
+    average_test_loss = eval_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_size)
     print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
     torch.save({
@@ -99,7 +99,7 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, crit
     alpha_layer.train()
     criterion.train()
 
-    batch_alpha_accum = []
+    # batch_alpha_accum = []
 
     for batch in train_loader:
 
@@ -259,7 +259,7 @@ def main(args):
     siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 192, shuffle=False, num_workers=10)
 
     embedding_dim = 64
-    encoder = Model(num_features, embedding_dim, 1).to(device)
+    encoder = Model(num_features, embedding_dim, 1, use_attention=True, attn_concat=True).to(device)
 
     encoder = train_triplet_network(triplet_loader, encoder, device, args)
     encoder.freeze_params(encoder)
@@ -270,7 +270,8 @@ def main(args):
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
-    alpha_layer = AlphaPermutationLayer(perm_matrices, k, embedding_dim).to(device)
+    model = AlphaMLP(encoder.output_dim, k)
+    alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
     alpha_tracker = AlphaTracker(k)
 
     criterion = GEDLoss().to(device)
