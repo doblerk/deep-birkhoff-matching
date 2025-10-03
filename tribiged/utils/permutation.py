@@ -74,6 +74,6 @@ class PermutationPool:
         Returns a batch of k permutation matrices of shape (k, max_n, max_n)
         One-hot encoded, inactive rows filled with zeros
         """
-        matrices = torch.zeros((self.k, self.max_n, self.max_n), dtype=torch.float32)
+        matrices = torch.zeros((self.k, self.max_n, self.max_n), device=self.device, dtype=torch.float32)
         matrices.scatter_(2, self.perm_vectors.unsqueeze(-1), 1.0)
         return matrices
