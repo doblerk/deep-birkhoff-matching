@@ -66,7 +66,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
     torch.save({
         'encoder': encoder.state_dict(),
         'optimizer': optimizer.state_dict(),
-    }, f'{args.output_dir}/checkpoint_encoder_entropy.pth')
+    }, f'{args.output_dir}/checkpoint_encoder_unnormalized.pth')
 
     return encoder
 
@@ -99,7 +99,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
         'alpha_layer': alpha_layer.state_dict(),
         'optimizer': optimizer.state_dict(),
         'criterion': criterion.state_dict(),
-    }, f'{args.output_dir}/checkpoint_ged_entropy.pth')
+    }, f'{args.output_dir}/checkpoint_ged_unnormalized.pth')
 
 
 def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, optimizer, device, max_graph_size, history=None):
@@ -257,7 +257,7 @@ def main(args):
     train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size], generator=generator)
     train_dataset_indices, val_dataset_indices = sorted(train_dataset.indices), sorted(val_dataset.indices)
 
-    ged_dict = ged_matrix_to_dict(ged_matrix)
+    ged_dict = ged_matrix_to_dict(norm_ged_matrix)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -287,6 +287,7 @@ def main(args):
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
     model = AlphaMLP(encoder.output_dim, k)
+    # model = AlphaBilinear(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
     alpha_tracker = AlphaTracker(k)
 

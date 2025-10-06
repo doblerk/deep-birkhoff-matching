@@ -33,7 +33,6 @@ class AlphaBilinear(nn.Module):
         self.bilinear = nn.Parameter(torch.randn(k, input_dim, input_dim))
     
     def forward(self, g1, g2):
-        print(g1.shape)
         scores = []
         for i in range(self.bilinear.shape[0]):
             W = self.bilinear[i]

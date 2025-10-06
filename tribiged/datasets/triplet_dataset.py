@@ -16,7 +16,8 @@ class TripletDataset(Dataset):
         self.sorted_neighbors = {
             i: sorted(
                 [(j, self._get_ged(i, j)) for j in self.indices if j != i],
-                key=lambda x: x[1]
+                key=lambda x: x[1],
+                reverse=False
             )
             for i in self.indices
         }
