@@ -78,7 +78,7 @@ class AlphaCrossAttention(nn.Module):
 
 class AlphaPermutationLayer(nn.Module):
    
-    def __init__(self, perm_matrices: torch.Tensor, model: nn.Module, temperature: float = 1.0):
+    def __init__(self, perm_matrices: torch.Tensor, model: nn.Module, temperature: float = 1.0, freeze_epochs: int = 2):
         """
         Args:
             perm_matrices: tensor of fixed permutation matrices (k, n, n)
@@ -89,27 +89,37 @@ class AlphaPermutationLayer(nn.Module):
         self.k = perm_matrices.size(0)
         self.temperature = temperature
         self.model = model
-        self.freeze_counter = 10
+        self.freeze_epochs = freeze_epochs
+        self.freeze_timer = 0
+        self._frozen = False
 
     def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
         return F.softmax(alpha_logits / self.temperature, dim=1)
     
     def freeze_module(self):
-        for p in self.alpha_mlp.parameters():
+        for p in self.model.parameters():
             p.requires_grad = False
+        self._frozen = True
+        print(f"🧊 {self.model.__class__.__name__} frozen.")
     
     def unfreeze_module(self):
-        for p in self.alpha_mlp.parameters():
+        for p in self.model.parameters():
             p.requires_grad = True
+        self._frozen = False
+        print(f"🔥 {self.model.__class__.__name__} unfrozen.")
     
-    def update_counter(self):
-        self.freeze_counter -= 1
+    def start_freeze_timer(self):
+        self.freeze_timer = self.freeze_epochs
     
-    def clear_counter(self):
-        self.freeze_counter = 10
+    def update_freeze_timer(self):
+        if self.freeze_timer > 0:
+            self.freeze_timer -= 1
     
-    def get_freeze_counter(self):
-        return self.freeze_counter
+    def reset_freeze_timer(self):
+        self.freeze_counter = self.freeze_epochs
+    
+    def is_frozen(self):
+        return self._frozen
     
     def entropy_loss(self, alphas: torch.Tensor) -> torch.Tensor:
         entropy = - (alphas * torch.log(alphas + 1e-8)).sum(dim=1)

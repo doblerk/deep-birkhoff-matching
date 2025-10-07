@@ -106,7 +106,7 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas):
     ax2.set_ylim(0.0, 1.0)
 
     plt.tight_layout()
-    plt.savefig(f'./res/AIDS700nef/combined_assignments_{idx1}_{idx2}_unnormalized.png', dpi=800)
+    plt.savefig(f'./res/AIDS/combined_assignments_{idx1}_{idx2}_unnormalized.png', dpi=800)
     # plt.show()
 
 
@@ -135,7 +135,7 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 21
+    k = 51
     
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
@@ -148,17 +148,17 @@ def main():
 
     ged_optimizer = torch.optim.Adam(
         list(alpha_layer.parameters()) + list(criterion.parameters()),
-        lr=1e-3, 
+        lr=1e-3,
         weight_decay=1e-5
     )
 
-    checkpoint_encoder = torch.load('res/AIDS700nef/checkpoint_encoder_unnormalized.pth', map_location=device)
+    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_unnormalized.pth', map_location=device)
     encoder.load_state_dict(checkpoint_encoder['encoder'])
     encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
 
     encoder = encoder.to(device)
 
-    checkpoint_ged = torch.load('res/AIDS700nef/checkpoint_ged_unnormalized.pth', map_location=device)
+    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_unnormalized.pth', map_location=device)
     alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
     ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
     criterion.load_state_dict(checkpoint_ged['criterion'])
