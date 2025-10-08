@@ -100,13 +100,11 @@ class AlphaPermutationLayer(nn.Module):
         for p in self.model.parameters():
             p.requires_grad = False
         self._frozen = True
-        print(f"🧊 {self.model.__class__.__name__} frozen.")
     
     def unfreeze_module(self):
         for p in self.model.parameters():
             p.requires_grad = True
         self._frozen = False
-        print(f"🔥 {self.model.__class__.__name__} unfrozen.")
     
     def start_freeze_timer(self):
         self.freeze_timer = self.freeze_epochs

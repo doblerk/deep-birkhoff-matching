@@ -21,6 +21,7 @@ from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
 from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear
 from tribiged.utils.train_utils import AlphaTracker
+from tribiged.models.cost_matrix_builder import CostMatrixBuilder
 from tribiged.utils.diagnostics import accumulate_epoch_stats, \
                                        batched_diagnostics, \
                                        plot_history
@@ -106,8 +107,8 @@ def plot_assignments_and_alphas(idx1, idx2, soft_assignment, alphas):
     ax2.set_ylim(0.0, 1.0)
 
     plt.tight_layout()
-    plt.savefig(f'./res/AIDS/combined_assignments_{idx1}_{idx2}_unnormalized.png', dpi=800)
-    # plt.show()
+    # plt.savefig(f'./res/AIDS/combined_assignments_{idx1}_{idx2}_unnormalized.png', dpi=800)
+    plt.show()
 
 
 def main():
@@ -135,7 +136,7 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 51
+    k = 21
     
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
@@ -144,26 +145,29 @@ def main():
     # model = AlphaBilinear(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
 
+    cost_builder = CostMatrixBuilder(embedding_dim, max_graph_size, use_learned_sub=False)
+
     criterion = criterion = GEDLoss().to(device)
 
     ged_optimizer = torch.optim.Adam(
-        list(alpha_layer.parameters()) + list(criterion.parameters()),
+        list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3,
         weight_decay=1e-5
     )
 
-    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_unnormalized.pth', map_location=device)
+    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_debug.pth', map_location=device)
     encoder.load_state_dict(checkpoint_encoder['encoder'])
     encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
 
     encoder = encoder.to(device)
 
-    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_unnormalized.pth', map_location=device)
+    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_debug.pth', map_location=device)
     alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
     ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
     criterion.load_state_dict(checkpoint_ged['criterion'])
 
     alpha_layer = alpha_layer.to(device)
+    cost_builder = cost_builder.to(device)
     criterion = criterion.to(device)
 
     encoder.eval()
@@ -191,7 +195,7 @@ def main():
     loader = DataLoader(data, batch_size=3, collate_fn=lambda batch: (
         Batch.from_data_list([x[0] for x in batch]),  # b1
         Batch.from_data_list([x[1] for x in batch]),  # b2
-        torch.tensor([x[2] for x in batch])           # norm_geds
+        torch.tensor([x[2] for x in batch])           # geds
     ))
 
     with torch.no_grad():
@@ -208,8 +212,11 @@ def main():
                 node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
                 node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-                cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
-                padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+                # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+                # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+
+                cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, batch1.batch, node_repr_b2, batch2.batch)
+                print(cost_matrices[0])
 
                 soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
@@ -223,7 +230,7 @@ def main():
                 row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
                 soft_assignments = soft_assignments / row_sums
                 
-                predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+                predicted_ged = criterion(cost_matrices, soft_assignments)
                 print(predicted_ged)
                 # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
                 # print(normalized_predicted_ged)

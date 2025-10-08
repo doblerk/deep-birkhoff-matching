@@ -17,6 +17,7 @@ from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
 from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear
 from tribiged.utils.train_utils import AlphaTracker
+from tribiged.models.cost_matrix_builder import CostMatrixBuilder
 from tribiged.utils.diagnostics import accumulate_epoch_stats, \
                                        batched_diagnostics, \
                                        plot_history
@@ -26,7 +27,7 @@ from tribiged.utils.data_utils import ged_matrix_to_dict, \
                                       get_node_masks
 
 
-def train_triplet_network(loader, encoder, device, args, epochs=1):
+def train_triplet_network(loader, encoder, device, args, epochs=1001):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -66,16 +67,16 @@ def train_triplet_network(loader, encoder, device, args, epochs=1):
     torch.save({
         'encoder': encoder.state_dict(),
         'optimizer': optimizer.state_dict(),
-    }, f'{args.output_dir}/checkpoint_encoder_unnormalized.pth')
+    }, f'{args.output_dir}/checkpoint_encoder_debug.pth')
 
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, device, max_graph_size, args, epochs=101):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=1001):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
-        list(alpha_layer.parameters()) + list(criterion.parameters()),
+        list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3, 
         weight_decay=1e-5
     )
@@ -84,13 +85,13 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
     for epoch in range(epochs):
 
-        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, optimizer, device, max_graph_size, history=history)
+        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, max_graph_size, history=history)
 
         if epoch % 10 == 0:
-            average_val_loss = eval_ged(val_loader, encoder, alpha_layer, criterion, device, max_graph_size)
+            average_val_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
-    average_test_loss = eval_ged(test_loader, encoder, alpha_layer, criterion, device, max_graph_size)
+    average_test_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
     print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
     # plot_history(history)
@@ -99,10 +100,10 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
         'alpha_layer': alpha_layer.state_dict(),
         'optimizer': optimizer.state_dict(),
         'criterion': criterion.state_dict(),
-    }, f'{args.output_dir}/checkpoint_ged_unnormalized.pth')
+    }, f'{args.output_dir}/checkpoint_ged_debug.pth')
 
 
-def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, optimizer, device, max_graph_size, history=None):
+def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, max_graph_size, history=None):
     alpha_layer.train()
     criterion.train()
 
@@ -122,10 +123,15 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, crit
         with torch.no_grad():
             node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
             node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
-        
-        cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
 
-        padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+        # %%% Test
+        # print(f'Comparing {n_nodes_1[0]} nodes with {n_nodes_2[0]} nodes.')
+        cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, batch1.batch, node_repr_b2, batch2.batch)
+        # %%%
+        
+        # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+
+        # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
         alpha_tracker.collect(alphas)
@@ -147,7 +153,8 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, crit
         #     history["mean_singular_value"].append(stats["mean_singular_value"].mean())
         #     history["mean_entropy"].append(stats["mean_entropy"].mean())
 
-        predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        # predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        predicted_ged = criterion(cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
         # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
@@ -176,8 +183,9 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, crit
 
 
 @torch.no_grad()
-def eval_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size):
+def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size):
     alpha_layer.eval()
+    cost_builder.eval()
     criterion.eval()
 
     total_loss = 0.0
@@ -196,9 +204,11 @@ def eval_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size):
         node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
         node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-        cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+        cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, batch1.batch, node_repr_b2, batch2.batch)
 
-        padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+        # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
+
+        # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
@@ -212,7 +222,8 @@ def eval_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size):
         row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         soft_assignments = soft_assignments / row_sums
 
-        predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        # predicted_ged = criterion(padded_cost_matrices, soft_assignments)
+        predicted_ged = criterion(cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
         # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
@@ -287,11 +298,19 @@ def main(args):
     model = AlphaMLP(encoder.output_dim, k)
     # model = AlphaBilinear(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
-    alpha_tracker = AlphaTracker(k, warmup=50, window=10)
+    alpha_tracker = AlphaTracker(k, warmup=100, window=10)
+
+    cost_builder = CostMatrixBuilder(
+        embedding_dim=embedding_dim,
+        max_graph_size=max_graph_size,
+        use_learned_sub=False,
+        model_indel=None,
+        rank=None
+    ).to(device)
 
     criterion = GEDLoss().to(device)
 
-    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, criterion, device, max_graph_size, args)
+    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args)
 
 
 if __name__ == '__main__':
