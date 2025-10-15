@@ -27,7 +27,7 @@ from tribiged.utils.data_utils import ged_matrix_to_dict, \
                                       get_node_masks
 
 
-def train_triplet_network(loader, encoder, device, args, epochs=1001):
+def train_triplet_network(loader, encoder, device, args, epochs=1):
     encoder.train()
     optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = TripletLoss(margin=0.2)
@@ -72,7 +72,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=1001):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=1):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
@@ -136,12 +136,12 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
         alpha_tracker.collect(alphas)
         
-        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
-        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
+        # row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        # col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
-        assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
-
-        soft_assignments = soft_assignments * assignment_mask
+        # assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
+        assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
+        soft_assignments = soft_assignments * assignment_masks
 
         row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         soft_assignments = soft_assignments / row_sums
@@ -212,12 +212,13 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
-        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
+        # row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
+        # col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
 
-        assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
-
-        soft_assignments = soft_assignments * assignment_mask
+        # assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
+        
+        assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
+        soft_assignments = soft_assignments * assignment_masks
 
         row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         soft_assignments = soft_assignments / row_sums
