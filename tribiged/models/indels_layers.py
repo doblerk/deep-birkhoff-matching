@@ -6,18 +6,33 @@ from torch.nn import Linear
 
 
 class IndelBilinear(nn.Module):
+    """
+    Bilinear indel cost model: learns insertion/deletion costs based on
+    node embeddings and opposite graph embedding.
+
+    Cost ~ softplus(scale *  (nodeᵀ W graph + b))
+
+    Args:
+        dim: embedding dimension
+        bias: whether to include bias term
+        diagonal: if True, use diagonal bilinear form (fewer params)
+    """
     def __init__(self, dim, bias=False, diagonal=False):
         super().__init__()
         self.diagonal = diagonal
+        
         if diagonal:
             # parametrize W as vector (diagonal)
             self.W = nn.Parameter(torch.randn(dim))
         else:
             self.W = nn.Parameter(torch.randn(dim, dim))
+        
         if bias:
-            self.b = nn.Paramter(torch.zeros(1))
+            self.b = nn.Parameter(torch.zeros(1))
         else:
             self.register_parameter('b', None)
+        
+        # learnable scaling to control magnitude
         self.scale = nn.Parameter(torch.tensor(1.0))
     
     def forward(self, node_emb, graph_emb):
@@ -29,9 +44,8 @@ class IndelBilinear(nn.Module):
             graph_emb: (B, d) graph-level embeddings of the smaller graphs
         
         Returns:
-            costs: (B, N) indel costs for each node w.r.t. the smaller graphs
+            costs: (B, N) indel costs per node
         """
-        B, N, d = node_emb.shape
         if self.diagonal:
             # (B, N, d) * (d) -> (B, N, d) then dot with graph_emb
             weighted = node_emb * self.W
@@ -40,6 +54,7 @@ class IndelBilinear(nn.Module):
         else:
             # (d, d) matmul each node: use einsum for batch
             weighted_node = torch.einsum('bnd,dk->bnk', node_emb, self.W) # (B, N, d)
+            # dot with graph embedding → (B, N)
             costs = torch.einsum('bnk,bd->bn', weighted_node, graph_emb) # (B, N)
 
         if self.b is not None:
@@ -50,7 +65,7 @@ class IndelBilinear(nn.Module):
         return costs
 
 
-class IndelLowRankBilinear(nn.Nodule):
+class IndelLowRankBilinear(nn.Module):
     def __init__(self, d, r=64):
         super().__init__()
         self.U = Linear(d, r, bias=False) # proj node

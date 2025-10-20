@@ -15,6 +15,7 @@ from tribiged.models.gnn_models import Model
 from tribiged.losses.triplet_loss import TripletLoss
 from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
+from tribiged.models.indels_layers import IndelBilinear
 from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear
 from tribiged.utils.train_utils import AlphaTracker
 from tribiged.models.cost_matrix_builder import CostMatrixBuilder
@@ -124,22 +125,11 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
             node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
             node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-        # %%% Test
-        # print(f'Comparing {n_nodes_1[0]} nodes with {n_nodes_2[0]} nodes.')
-        cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, batch1.batch, node_repr_b2, batch2.batch)
-        # %%%
-        
-        # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
-
-        # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+        cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
-        alpha_tracker.collect(alphas)
+        # alpha_tracker.collect(alphas)
         
-        # row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
-        # col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
-
-        # assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
         assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
         soft_assignments = soft_assignments * assignment_masks
 
@@ -153,33 +143,31 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         #     history["mean_singular_value"].append(stats["mean_singular_value"].mean())
         #     history["mean_entropy"].append(stats["mean_entropy"].mean())
 
-        # predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         predicted_ged = criterion(cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
         # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
-        # entropy_loss = alpha_layer.entropy_loss(alphas)
-        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean') #+ 1e-3 * entropy_loss
+        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
 
         loss.backward()
         optimizer.step()
 
-    sorted_idx, scores = alpha_tracker.update()
-    if sorted_idx is not None:
-        worst_indices = sorted_idx[:2]
-        best_indices = sorted_idx[-2:]
-        perm_pool.mate_permutations(worst_indices, best_indices)
+    # sorted_idx, scores = alpha_tracker.update()
+    # if sorted_idx is not None:
+    #     worst_indices = sorted_idx[:2]
+    #     best_indices = sorted_idx[-2:]
+    #     perm_pool.mate_permutations(worst_indices, best_indices)
 
-        # freeze weights after pruning
-        alpha_layer.freeze_module()
-        alpha_layer.start_freeze_timer()
+    #     # freeze weights after pruning
+    #     alpha_layer.freeze_module()
+    #     alpha_layer.start_freeze_timer()
     
-    if alpha_layer.is_frozen():
-        alpha_layer.update_freeze_timer()
+    # if alpha_layer.is_frozen():
+    #     alpha_layer.update_freeze_timer()
 
-        if alpha_layer.freeze_timer == 0:
-            alpha_layer.unfreeze_module()
-            alpha_layer.reset_freeze_timer()
+    #     if alpha_layer.freeze_timer == 0:
+    #         alpha_layer.unfreeze_module()
+    #         alpha_layer.reset_freeze_timer()
 
 
 @torch.no_grad()
@@ -204,18 +192,9 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_
         node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
         node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-        cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, batch1.batch, node_repr_b2, batch2.batch)
-
-        # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
-
-        # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+        cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
-
-        # row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
-        # col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
-
-        # assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
         
         assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
         soft_assignments = soft_assignments * assignment_masks
@@ -223,7 +202,6 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_
         row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         soft_assignments = soft_assignments / row_sums
 
-        # predicted_ged = criterion(padded_cost_matrices, soft_assignments)
         predicted_ged = criterion(cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
         # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
@@ -297,15 +275,15 @@ def main(args):
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
     model = AlphaMLP(encoder.output_dim, k)
-    # model = AlphaBilinear(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
     alpha_tracker = AlphaTracker(k, warmup=100, window=10)
+    model_indel = IndelBilinear(encoder.output_dim, bias=True)
 
     cost_builder = CostMatrixBuilder(
         embedding_dim=embedding_dim,
         max_graph_size=max_graph_size,
-        use_learned_sub=False,
-        model_indel=None,
+        use_learned_sub=True,
+        model_indel=model_indel,
         rank=None
     ).to(device)
 
