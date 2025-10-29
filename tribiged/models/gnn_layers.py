@@ -34,7 +34,6 @@ class GINLayer(torch.nn.Module):
                 BatchNorm1d(hidden_dim),
                 ReLU(),
                 Linear(hidden_dim, hidden_dim),
-                BatchNorm1d(hidden_dim),
                 ReLU(),
             )
         )

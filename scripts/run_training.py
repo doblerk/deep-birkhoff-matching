@@ -28,9 +28,9 @@ from tribiged.utils.data_utils import ged_matrix_to_dict, \
                                       get_node_masks
 
 
-def train_triplet_network(loader, encoder, device, args, epochs=1):
+def train_triplet_network(loader, encoder, device, args, epochs=1001):
     encoder.train()
-    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5) # added AdamW
     criterion = TripletLoss(margin=0.2)
     
     for epoch in range(epochs):
@@ -62,46 +62,48 @@ def train_triplet_network(loader, encoder, device, args, epochs=1):
 
         average_loss = total_loss / total_samples
         
-        if epoch % 10 == 0:
+        if epoch % 50 == 0:
             print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
     
-    torch.save({
-        'encoder': encoder.state_dict(),
-        'optimizer': optimizer.state_dict(),
-    }, f'{args.output_dir}/checkpoint_encoder_debug.pth')
+    # torch.save({
+    #     'encoder': encoder.state_dict(),
+    #     'optimizer': optimizer.state_dict(),
+    # }, f'{args.output_dir}/checkpoint_encoder_debug.pth')
 
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=1):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=2001):
     encoder.eval()
 
     optimizer = torch.optim.Adam(
         list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3, 
         weight_decay=1e-5
-    )
+    ) # Added AdamW
 
     history = {k: [] for k in ["spectral_gap", "top_singular_value", "mean_singular_value", "mean_entropy"]}
+    val_losses = []
 
     for epoch in range(epochs):
 
         train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, max_graph_size, history=history)
 
-        if epoch % 10 == 0:
+        if epoch % 1 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
+            val_losses.append(average_val_loss)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
-
-    average_test_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
+    np.save('res/AIDS/val_losses_bl_21_second.npy', np.array(val_losses))
+    average_test_loss = eval_ged(test_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
     print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
 
     # plot_history(history)
 
-    torch.save({
-        'alpha_layer': alpha_layer.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'criterion': criterion.state_dict(),
-    }, f'{args.output_dir}/checkpoint_ged_debug.pth')
+    # torch.save({
+    #     'alpha_layer': alpha_layer.state_dict(),
+    #     'optimizer': optimizer.state_dict(),
+    #     'criterion': criterion.state_dict(),
+    # }, f'{args.output_dir}/checkpoint_ged_debug.pth')
 
 
 def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, max_graph_size, history=None):
@@ -143,6 +145,9 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         #     history["mean_singular_value"].append(stats["mean_singular_value"].mean())
         #     history["mean_entropy"].append(stats["mean_entropy"].mean())
 
+        # print(f'Graph with {n_nodes_1[0]} vs. Graph with {n_nodes_2[0]}')
+        # print(cost_matrices[0])
+
         predicted_ged = criterion(cost_matrices, soft_assignments)
         normalized_predicted_ged = predicted_ged / normalization_factor
         # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
@@ -154,13 +159,11 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
 
     # sorted_idx, scores = alpha_tracker.update()
     # if sorted_idx is not None:
-    #     worst_indices = sorted_idx[:2]
-    #     best_indices = sorted_idx[-2:]
-    #     perm_pool.mate_permutations(worst_indices, best_indices)
+    #     perm_pool.mate_permutations(sorted_idx, k=11)
 
-    #     # freeze weights after pruning
-    #     alpha_layer.freeze_module()
-    #     alpha_layer.start_freeze_timer()
+        # freeze weights after pruning
+        # alpha_layer.freeze_module()
+        # alpha_layer.start_freeze_timer()
     
     # if alpha_layer.is_frozen():
     #     alpha_layer.update_freeze_timer()
@@ -249,7 +252,7 @@ def main(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    p = int(len(train_dataset) * 0.25)
+    p = int(len(train_dataset) * 0.25) # before 0.25
 
     triplet_train = TripletDataset(dataset, train_dataset_indices, ged_dict, k=p)
     triplet_loader = DataLoader(triplet_train, batch_size=len(triplet_train), shuffle=True, num_workers=0)
@@ -282,8 +285,8 @@ def main(args):
     cost_builder = CostMatrixBuilder(
         embedding_dim=embedding_dim,
         max_graph_size=max_graph_size,
-        use_learned_sub=True,
-        model_indel=model_indel,
+        use_learned_sub=False,
+        model_indel=None,
         rank=None
     ).to(device)
 

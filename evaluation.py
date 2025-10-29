@@ -132,7 +132,7 @@ def main():
     # Load models
     embedding_dim = 64
     encoder = Model(num_features, embedding_dim, 1, use_attention=False, attn_concat=False).to(device)
-    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
+    encoder_optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
@@ -149,7 +149,7 @@ def main():
 
     criterion = criterion = GEDLoss().to(device)
 
-    ged_optimizer = torch.optim.Adam(
+    ged_optimizer = torch.optim.AdamW(
         list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3,
         weight_decay=1e-5
@@ -215,17 +215,12 @@ def main():
                 # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
                 # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
 
-                cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, batch1.batch, node_repr_b2, batch2.batch)
-                print(cost_matrices[0])
+                cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
                 soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
 
-                row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
-                col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
-
-                assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
-
-                soft_assignments = soft_assignments * assignment_mask
+                assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
+                soft_assignments = soft_assignments * assignment_masks
 
                 row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
                 soft_assignments = soft_assignments / row_sums
@@ -236,7 +231,7 @@ def main():
                 # print(normalized_predicted_ged)
 
     plot_assignments_and_alphas(20, 607, soft_assignments[0], alphas[0].cpu().numpy())
-    # plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())
+    plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())
     plot_assignments_and_alphas(20, 611, soft_assignments[2], alphas[2].cpu().numpy())
     
     # plot_assignments_and_alphas(10, 1230, soft_assignments[0], alphas[0].cpu().numpy())
