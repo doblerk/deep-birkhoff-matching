@@ -136,7 +136,7 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 21
+    k = 101
     
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
@@ -149,19 +149,19 @@ def main():
 
     criterion = criterion = GEDLoss().to(device)
 
-    ged_optimizer = torch.optim.AdamW(
+    ged_optimizer = torch.optim.Adam(
         list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3,
         weight_decay=1e-5
     )
 
-    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_debug.pth', map_location=device)
+    checkpoint_encoder = torch.load('res/AIDS700nef/checkpoint_encoder_debug.pth', map_location=device)
     encoder.load_state_dict(checkpoint_encoder['encoder'])
     encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
 
     encoder = encoder.to(device)
 
-    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_debug.pth', map_location=device)
+    checkpoint_ged = torch.load('res/AIDS700nef/checkpoint_ged_debug.pth', map_location=device)
     alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
     ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
     criterion.load_state_dict(checkpoint_ged['criterion'])
