@@ -136,7 +136,7 @@ def main():
 
     max_graph_size = max([g.num_nodes for g in dataset])
     k = (max_graph_size - 1) ** 2 + 1 # upper (theoretical) bound
-    k = 101
+    k = 21
     
     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
     perm_matrices = perm_pool.get_matrix_batch().to(device)
@@ -149,7 +149,7 @@ def main():
 
     criterion = criterion = GEDLoss().to(device)
 
-    ged_optimizer = torch.optim.Adam(
+    ged_optimizer = torch.optim.AdamW(
         list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3,
         weight_decay=1e-5
@@ -212,8 +212,9 @@ def main():
                 node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
                 node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-                # cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
-                # padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+                g = torch.abs(graph_repr_b1 - graph_repr_b2)
+                print(g)
+                print(torch.sum(g, dim=1))
 
                 cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 

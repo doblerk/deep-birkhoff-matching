@@ -30,7 +30,7 @@ from tribiged.utils.data_utils import ged_matrix_to_dict, \
 
 def train_triplet_network(loader, encoder, device, args, epochs=1001):
     encoder.train()
-    optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5) # added AdamW
+    optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-5) # added AdamW
     criterion = TripletLoss(margin=0.8)
     
     for epoch in range(epochs):
@@ -76,7 +76,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
 def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=2001):
     encoder.eval()
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
         lr=1e-3, 
         weight_decay=1e-5
@@ -252,7 +252,7 @@ def main(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    p = int(len(train_dataset) * 0.5) # before 0.25
+    p = int(len(train_dataset) * 0.4) # before 0.25
 
     triplet_train = TripletDataset(dataset, train_dataset_indices, ged_dict, k=p)
     triplet_loader = DataLoader(triplet_train, batch_size=len(triplet_train), shuffle=True, num_workers=0)

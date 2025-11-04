@@ -10,19 +10,33 @@ import torch.nn.functional as F
 class AlphaMLP(nn.Module):
     def __init__(self, input_dim, k):
         super().__init__()
+        # self.mlp = nn.Sequential(
+        #     nn.Dropout(0.4),
+        #     nn.Linear(input_dim * 2, input_dim * 4),
+        #     nn.ReLU(inplace=True),
+        #     nn.LayerNorm(input_dim * 4),
+        #     nn.Dropout(0.4),
+        #     nn.Linear(input_dim * 4, input_dim * 4),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(input_dim * 4, k)
+        # )
         self.mlp = nn.Sequential(
-            nn.Dropout(0.4),
             nn.Linear(input_dim * 2, input_dim * 4),
             nn.ReLU(inplace=True),
             nn.LayerNorm(input_dim * 4),
-            nn.Dropout(0.4),
+            nn.Dropout(0.2),
+            
             nn.Linear(input_dim * 4, input_dim * 4),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
+            nn.LayerNorm(input_dim * 4),
+            nn.Dropout(0.2),
+
             nn.Linear(input_dim * 4, k)
         )
     
     def forward(self, g1, g2):
         pair_repr = torch.cat([g1, g2], dim=-1)
+        # pair_repr = torch.abs(g1 - g2)
         return self.mlp(pair_repr)
 
 
@@ -87,11 +101,16 @@ class AlphaPermutationLayer(nn.Module):
         super().__init__()
         self.perm_matrices = perm_matrices
         self.k = perm_matrices.size(0)
-        self.temperature = temperature
+        self.temperature = temperature #nn.Parameter(torch.ones(1))
         self.model = model
         self.freeze_epochs = freeze_epochs
         self.freeze_timer = 0
         self._frozen = False
+
+    # @property
+    # def temperature(self):
+    #     # ensure temperature > 0
+    #     return torch.exp(self.log_temp) + 1e-6
 
     def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
         return F.softmax(alpha_logits / self.temperature, dim=1)
