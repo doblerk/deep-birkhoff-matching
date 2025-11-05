@@ -19,7 +19,7 @@ from tribiged.models.gnn_models import Model
 from tribiged.losses.triplet_loss import TripletLoss
 from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
-from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear
+from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear, AlphaCrossAttention
 from tribiged.utils.train_utils import AlphaTracker
 from tribiged.models.cost_matrix_builder import CostMatrixBuilder
 from tribiged.utils.diagnostics import accumulate_epoch_stats, \
@@ -117,7 +117,8 @@ def main():
     train_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=True)
     test_dataset = GEDDataset(root='data/datasets/AIDS700nef', name='AIDS700nef', train=False)
 
-    print(train_dataset.ged[20, 607], ' ', train_dataset.ged[20, 562], ' ', train_dataset.ged[20, 611])
+    # print(train_dataset.ged[20, 607], ' ', train_dataset.ged[20, 562], ' ', train_dataset.ged[20, 611])
+    print(torch.exp(-train_dataset.norm_ged[20, 607]).item(), ' ', torch.exp(-train_dataset.norm_ged[20, 562]).item(), ' ', torch.exp(-train_dataset.norm_ged[20, 611]).item())
 
     if 'x' not in train_dataset[0]:
         train_dataset.transform = Constant(value=1.0)
@@ -143,6 +144,7 @@ def main():
 
     model = AlphaMLP(encoder.output_dim, k)
     # model = AlphaBilinear(encoder.output_dim, k)
+    # model = AlphaCrossAttention(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
 
     cost_builder = CostMatrixBuilder(embedding_dim, max_graph_size, use_learned_sub=False)
@@ -155,13 +157,13 @@ def main():
         weight_decay=1e-5
     )
 
-    checkpoint_encoder = torch.load('res/AIDS700nef/checkpoint_encoder_debug.pth', map_location=device)
+    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_debug.pth', map_location=device)
     encoder.load_state_dict(checkpoint_encoder['encoder'])
     encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
 
     encoder = encoder.to(device)
 
-    checkpoint_ged = torch.load('res/AIDS700nef/checkpoint_ged_debug.pth', map_location=device)
+    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_debug.pth', map_location=device)
     alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
     ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
     criterion.load_state_dict(checkpoint_ged['criterion'])
@@ -212,10 +214,6 @@ def main():
                 node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
                 node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
 
-                g = torch.abs(graph_repr_b1 - graph_repr_b2)
-                print(g)
-                print(torch.sum(g, dim=1))
-
                 cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
                 soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
@@ -227,9 +225,9 @@ def main():
                 soft_assignments = soft_assignments / row_sums
                 
                 predicted_ged = criterion(cost_matrices, soft_assignments)
-                print(predicted_ged)
-                # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
-                # print(normalized_predicted_ged)
+                # print(predicted_ged)
+                normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
+                print(normalized_predicted_ged)
 
     plot_assignments_and_alphas(20, 607, soft_assignments[0], alphas[0].cpu().numpy())
     plot_assignments_and_alphas(20, 562, soft_assignments[1], alphas[1].cpu().numpy())

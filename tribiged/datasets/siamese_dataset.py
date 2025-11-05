@@ -44,7 +44,7 @@ class SiameseDataset(Dataset):
             raise ValueError(f'Unknown pair_mode: {pair_mode}')
     
     def _get_ged(self, i, j):
-        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 0.0))
+        return self.ged_labels.get((i, j), self.ged_labels.get((j, i), 1.0)) # 1.0 for GED range (0, 1], 0.0 otherwise
     
     def __len__(self):
         if self.pair_mode == 'train':
@@ -64,7 +64,7 @@ class SiameseDataset(Dataset):
                 idx2 = idx1
                 g1 = self.graphs[idx1]
                 g2 = g1.clone()
-                norm_ged = torch.tensor(0.0)
+                norm_ged = torch.tensor(1.0) # 1.0 for GED range (0, 1], 0.0 otherwise
             
             else:
                 idx2 = int(random.choice(self.train_indices))

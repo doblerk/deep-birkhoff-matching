@@ -17,7 +17,7 @@ class TripletDataset(Dataset):
             i: sorted(
                 [(j, self._get_ged(i, j)) for j in self.indices if j != i],
                 key=lambda x: x[1],
-                reverse=False
+                reverse=True # True for GED range (0, 1], False otherwise
             )
             for i in self.indices
         }
@@ -26,7 +26,7 @@ class TripletDataset(Dataset):
         return len(self.indices)
     
     def _get_ged(self, i, j):
-        return self.ged_dict.get((i, j), self.ged_dict.get((j, i), 0.0))
+        return self.ged_dict.get((i, j), self.ged_dict.get((j, i), 1.0)) # 1.0 for GED range (0, 1], 0.0 otherwise
   
     def __getitem__(self, idx):
         anchor_idx = self.indices[idx]

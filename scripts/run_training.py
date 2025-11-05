@@ -16,7 +16,7 @@ from tribiged.losses.triplet_loss import TripletLoss
 from tribiged.losses.ged_loss import GEDLoss
 from tribiged.utils.permutation import PermutationPool
 from tribiged.models.indels_layers import IndelBilinear
-from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear
+from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear, AlphaCrossAttention
 from tribiged.utils.train_utils import AlphaTracker
 from tribiged.models.cost_matrix_builder import CostMatrixBuilder
 from tribiged.utils.diagnostics import accumulate_epoch_stats, \
@@ -73,7 +73,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=2001):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=1001):
     encoder.eval()
 
     optimizer = torch.optim.AdamW(
@@ -84,6 +84,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
     history = {k: [] for k in ["spectral_gap", "top_singular_value", "mean_singular_value", "mean_entropy"]}
     # val_losses = []
+    print(perm_pool.get_vectors())
 
     for epoch in range(epochs):
 
@@ -96,6 +97,8 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     # np.save('res/AIDS/val_losses_bl_21_second.npy', np.array(val_losses))
     average_test_loss = eval_ged(test_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
     print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
+
+    print(perm_pool.get_vectors())
 
     # plot_history(history)
 
@@ -130,7 +133,7 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
         soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
-        # alpha_tracker.collect(alphas)
+        alpha_tracker.collect(alphas)
         
         assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
         soft_assignments = soft_assignments * assignment_masks
@@ -149,17 +152,17 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         # print(cost_matrices[0])
 
         predicted_ged = criterion(cost_matrices, soft_assignments)
-        normalized_predicted_ged = predicted_ged / normalization_factor
-        # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
+        # normalized_predicted_ged = predicted_ged / normalization_factor
+        normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
         loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
 
         loss.backward()
         optimizer.step()
 
-    # sorted_idx, scores = alpha_tracker.update()
-    # if sorted_idx is not None:
-    #     perm_pool.mate_permutations(sorted_idx, k=11)
+    sorted_idx, scores = alpha_tracker.update()
+    if sorted_idx is not None:
+        perm_pool.mate_permutations(sorted_idx, k=2)
 
         # freeze weights after pruning
         # alpha_layer.freeze_module()
@@ -206,8 +209,8 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_
         soft_assignments = soft_assignments / row_sums
 
         predicted_ged = criterion(cost_matrices, soft_assignments)
-        normalized_predicted_ged = predicted_ged / normalization_factor
-        # normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
+        # normalized_predicted_ged = predicted_ged / normalization_factor
+        normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
         loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
 
@@ -239,7 +242,7 @@ def main(args):
     num_features = train_dataset.num_features
 
     ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
-    # norm_ged_matrix = torch.exp(-norm_ged_matrix) # convert into range (0, 1] ?
+    norm_ged_matrix = torch.exp(-norm_ged_matrix) # -> range (0, 1] ?
 
     train_size = int(0.75 * len(train_dataset))
     val_size = len(train_dataset) - train_size
@@ -278,8 +281,9 @@ def main(args):
     perm_matrices = perm_pool.get_matrix_batch().to(device)
 
     model = AlphaMLP(encoder.output_dim, k)
+    # model = AlphaCrossAttention(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
-    alpha_tracker = AlphaTracker(k, warmup=100, window=10)
+    alpha_tracker = AlphaTracker(k, warmup=100, window=50)
     model_indel = IndelBilinear(encoder.output_dim, bias=True)
 
     cost_builder = CostMatrixBuilder(

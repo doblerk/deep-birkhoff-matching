@@ -66,24 +66,42 @@ class AlphaCrossAttention(nn.Module):
             batch_first=True
         )
 
-        self.fc = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+        # self.fc = nn.Sequential(
+        #     nn.Linear(input_dim, hidden_dim),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(hidden_dim, k)
+        # )
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim * 2, input_dim * 4),
             nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, k)
+            nn.LayerNorm(input_dim * 4),
+            nn.Dropout(0.2),
+            
+            nn.Linear(input_dim * 4, input_dim * 4),
+            nn.GELU(),
+            nn.LayerNorm(input_dim * 4),
+            nn.Dropout(0.2),
+
+            nn.Linear(input_dim * 4, k)
         )
     
     def forward(self, g1, g2):
         g1 = g1.unsqueeze(1)
         g2 = g2.unsqueeze(1)
 
-        # Cross-attention: let g1 qury g2
+        # Cross-attention: let g1 query g2
         attn_out, _ = self.attn(query=g1, key=g2, value=g2)
+        print(attn_out[0])
+        attn_out = attn_out.squeeze(1)
 
         # Pool across sequence dimension
-        pooled = attn_out.mean(dim=1)
+        # pooled = attn_out.mean(dim=1)
+        
+        # Concatenate g1 and attended g2
+        combined = torch.cat([g1.squeeze(1), attn_out], dim=-1)
 
         # Project to logits
-        return self.fc(pooled)
+        return self.mlp(combined)
 
 
 # --------------------------
