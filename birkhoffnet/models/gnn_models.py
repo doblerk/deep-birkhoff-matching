@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 from torch_geometric.nn import global_add_pool
 
-from tribiged.models.gnn_layers import GINLayer
-from tribiged.models.pooling_layers import AttentionPooling, DensePooling
+from birkhoffnet.models.gnn_layers import GINLayer
+from birkhoffnet.models.pooling_layers import AttentionPooling, DensePooling
 
 
 class Model(nn.Module):

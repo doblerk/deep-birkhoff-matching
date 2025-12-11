@@ -1,7 +1,7 @@
 import time
 import torch
 
-from tribiged.utils.data_utils import compute_cost_matrices, \
+from birkhoffnet.utils.data_utils import compute_cost_matrices, \
                                       pad_cost_matrices, \
                                       get_node_masks
 

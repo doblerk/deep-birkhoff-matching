@@ -13,19 +13,19 @@ from torch_geometric.datasets import TUDataset, GEDDataset
 from torch_geometric.utils import to_networkx
 from torch_geometric.transforms import Constant
 
-from tribiged.datasets.siamese_dataset import SiameseDataset
-from tribiged.datasets.triplet_dataset import TripletDataset
-from tribiged.models.gnn_models import Model
-from tribiged.losses.triplet_loss import TripletLoss
-from tribiged.losses.ged_loss import GEDLoss
-from tribiged.utils.permutation import PermutationPool
-from tribiged.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear, AlphaCrossAttention
-from tribiged.utils.train_utils import AlphaTracker
-from tribiged.models.cost_matrix_builder import CostMatrixBuilder
-from tribiged.utils.diagnostics import accumulate_epoch_stats, \
+from birkhoffnet.datasets.siamese_dataset import SiameseDataset
+from birkhoffnet.datasets.triplet_dataset import TripletDataset
+from birkhoffnet.models.gnn_models import Model
+from birkhoffnet.losses.triplet_loss import TripletLoss
+from birkhoffnet.losses.ged_loss import GEDLoss
+from birkhoffnet.utils.permutation import PermutationPool
+from birkhoffnet.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear, AlphaCrossAttention
+from birkhoffnet.utils.train_utils import AlphaTracker
+from birkhoffnet.models.cost_matrix_builder import CostMatrixBuilder
+from birkhoffnet.utils.diagnostics import accumulate_epoch_stats, \
                                        batched_diagnostics, \
                                        plot_history
-from tribiged.utils.data_utils import ged_matrix_to_dict, \
+from birkhoffnet.utils.data_utils import ged_matrix_to_dict, \
                                       compute_cost_matrices, \
                                       pad_cost_matrices, \
                                       get_node_masks

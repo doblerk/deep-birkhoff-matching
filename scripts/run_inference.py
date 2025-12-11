@@ -11,14 +11,14 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import GEDDataset
 from torch_geometric.transforms import Constant
 
-from tribiged.datasets.siamese_dataset import SiameseDataset
-from tribiged.datasets.triplet_dataset import TripletDataset
-from tribiged.models.gnn_models import Model
-from tribiged.losses.triplet_loss import TripletLoss
-from tribiged.losses.ged_loss import GEDLoss
-from tribiged.utils.permutation import PermutationPool
-from tribiged.models.alpha_layers import AlphaPermutationLayer
-from tribiged.utils.data_utils import ged_matrix_to_dict, \
+from birkhoffnet.datasets.siamese_dataset import SiameseDataset
+from birkhoffnet.datasets.triplet_dataset import TripletDataset
+from birkhoffnet.models.gnn_models import Model
+from birkhoffnet.losses.triplet_loss import TripletLoss
+from birkhoffnet.losses.ged_loss import GEDLoss
+from birkhoffnet.utils.permutation import PermutationPool
+from birkhoffnet.models.alpha_layers import AlphaPermutationLayer
+from birkhoffnet.utils.data_utils import ged_matrix_to_dict, \
                                       compute_cost_matrices, \
                                       pad_cost_matrices, \
                                       get_node_masks

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from typing import Tuple
-from tribiged.utils.permutation import PermutationPool
+from birkhoffnet.utils.permutation import PermutationPool
 
 
 class AlphaTracker:
