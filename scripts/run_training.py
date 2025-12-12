@@ -73,7 +73,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args, epochs=1001):
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args, epochs=1001):
     encoder.eval()
 
     optimizer = torch.optim.AdamW(
@@ -84,21 +84,18 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
     history = {k: [] for k in ["spectral_gap", "top_singular_value", "mean_singular_value", "mean_entropy"]}
     # val_losses = []
-    print(perm_pool.get_vectors())
 
     for epoch in range(epochs):
 
-        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, max_graph_size, history=history)
+        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, history=history)
 
         if epoch % 100 == 0:
-            average_val_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
+            average_val_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device)
             # val_losses.append(average_val_loss)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
     # np.save('res/AIDS/val_losses_bl_21_second.npy', np.array(val_losses))
-    average_test_loss = eval_ged(test_loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size)
+    average_test_loss = eval_ged(test_loader, encoder, alpha_layer, cost_builder, criterion, device)
     print(f"[GED] Final Epoch - Test MSE: {average_test_loss:.4f} - RMSE: {np.sqrt(average_test_loss):.1f} - Scale: {criterion.scale.item():.4f}")
-
-    print(perm_pool.get_vectors())
 
     # plot_history(history)
 
@@ -109,7 +106,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     }, f'{args.output_dir}/checkpoint_ged_debug.pth')
 
 
-def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, max_graph_size, history=None):
+def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, history=None):
     alpha_layer.train()
     criterion.train()
 
@@ -148,9 +145,6 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         #     history["mean_singular_value"].append(stats["mean_singular_value"].mean())
         #     history["mean_entropy"].append(stats["mean_entropy"].mean())
 
-        # print(f'Graph with {n_nodes_1[0]} vs. Graph with {n_nodes_2[0]}')
-        # print(cost_matrices[0])
-
         predicted_ged = criterion(cost_matrices, soft_assignments)
         # normalized_predicted_ged = predicted_ged / normalization_factor
         normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
@@ -160,9 +154,9 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         loss.backward()
         optimizer.step()
 
-    sorted_idx, scores = alpha_tracker.update()
-    if sorted_idx is not None:
-        perm_pool.mate_permutations(sorted_idx, k=2)
+    # sorted_idx, scores = alpha_tracker.update()
+    # if sorted_idx is not None:
+    #     perm_pool.mate_permutations(sorted_idx, k=2)
 
         # freeze weights after pruning
         # alpha_layer.freeze_module()
@@ -177,7 +171,7 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
 
 
 @torch.no_grad()
-def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_graph_size):
+def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device):
     alpha_layer.eval()
     cost_builder.eval()
     criterion.eval()
@@ -200,7 +194,7 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, max_
 
         cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
-        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        soft_assignments, _ = alpha_layer(graph_repr_b1, graph_repr_b2)
         
         assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
         soft_assignments = soft_assignments * assignment_masks
@@ -296,7 +290,7 @@ def main(args):
 
     criterion = GEDLoss().to(device)
 
-    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, max_graph_size, args)
+    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args)
 
 
 if __name__ == '__main__':

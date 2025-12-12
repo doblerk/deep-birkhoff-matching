@@ -157,13 +157,13 @@ def main():
         weight_decay=1e-5
     )
 
-    checkpoint_encoder = torch.load('res/AIDS/checkpoint_encoder_debug.pth', map_location=device)
+    checkpoint_encoder = torch.load('res/debug/checkpoint_encoder_debug.pth', map_location=device)
     encoder.load_state_dict(checkpoint_encoder['encoder'])
     encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
 
     encoder = encoder.to(device)
 
-    checkpoint_ged = torch.load('res/AIDS/checkpoint_ged_debug.pth', map_location=device)
+    checkpoint_ged = torch.load('res/debug/checkpoint_ged_debug.pth', map_location=device)
     alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
     ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
     criterion.load_state_dict(checkpoint_ged['criterion'])
