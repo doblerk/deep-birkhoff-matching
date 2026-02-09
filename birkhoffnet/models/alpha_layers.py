@@ -164,4 +164,5 @@ class AlphaPermutationLayer(nn.Module):
         alpha_logits = self.model(g1, g2)
         alphas = self.get_alpha_weights(alpha_logits)
         soft_assignments = torch.einsum('bk,kij->bij', alphas, self.perm_matrices)
-        return soft_assignments, alphas
+        entropy = -(alphas * (alphas + 1e-8).log()).sum(dim=-1).mean()
+        return soft_assignments, alphas, entropy

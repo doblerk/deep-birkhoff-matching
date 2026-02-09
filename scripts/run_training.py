@@ -28,9 +28,9 @@ from birkhoffnet.utils.data_utils import ged_matrix_to_dict, \
                                       get_node_masks
 
 
-def train_triplet_network(loader, encoder, device, args, epochs=1001):
+def train_triplet_network(loader, encoder, optimizer, device, args, epochs=2001):
     encoder.train()
-    optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-5) # added AdamW
+    # optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-6) # added AdamW
     criterion = TripletLoss(margin=0.8)
     
     for epoch in range(epochs):
@@ -62,7 +62,7 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
 
         average_loss = total_loss / total_samples
         
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             print(f"[Triplet Stage] Epoch {epoch+1}/{epochs} - Loss: {average_loss:.4f}")
     
     torch.save({
@@ -73,13 +73,11 @@ def train_triplet_network(loader, encoder, device, args, epochs=1001):
     return encoder
 
 
-def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args, epochs=1001):
-    encoder.eval()
-
+def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args, epochs=201):
     optimizer = torch.optim.AdamW(
         list(alpha_layer.parameters()) + list(cost_builder.parameters()) + list(criterion.parameters()),
-        lr=1e-3, 
-        weight_decay=1e-5
+        lr=1e-3,
+        weight_decay=1e-6
     ) # Added AdamW
 
     history = {k: [] for k in ["spectral_gap", "top_singular_value", "mean_singular_value", "mean_entropy"]}
@@ -89,7 +87,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
         train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, history=history)
 
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device)
             # val_losses.append(average_val_loss)
             print(f"[GED] Epoch {epoch+1}/{epochs} - Val MSE: {average_val_loss:.4f} - RMSE: {np.sqrt(average_val_loss):.1f} - Scale: {criterion.scale.item():.4f}")
@@ -99,11 +97,11 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
     # plot_history(history)
 
-    torch.save({
-        'alpha_layer': alpha_layer.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'criterion': criterion.state_dict(),
-    }, f'{args.output_dir}/checkpoint_ged_debug.pth')
+    # torch.save({
+    #     'alpha_layer': alpha_layer.state_dict(),
+    #     'optimizer': optimizer.state_dict(),
+    #     'criterion': criterion.state_dict(),
+    # }, f'{args.output_dir}/checkpoint_ged_debug.pth')
 
 
 def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, history=None):
@@ -129,7 +127,7 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
 
         cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
-        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        soft_assignments, alphas, entropy = alpha_layer(graph_repr_b1, graph_repr_b2)
         alpha_tracker.collect(alphas)
         
         assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
@@ -149,14 +147,18 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         # normalized_predicted_ged = predicted_ged / normalization_factor
         normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
-        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean')
+        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean') - 0.01 * entropy 
+        # λ_ent = λ0 * exp(-epoch / τ)
+        # λ0 ≈ 0.01 – 0.05
+        # τ ≈ 50–100 epochs
 
         loss.backward()
         optimizer.step()
 
-    # sorted_idx, scores = alpha_tracker.update()
-    # if sorted_idx is not None:
-    #     perm_pool.mate_permutations(sorted_idx, k=2)
+    sorted_idx, scores = alpha_tracker.update()
+    if sorted_idx is not None:
+        print(sorted_idx)
+        # perm_pool.mate_permutations(sorted_idx, k=2)
 
         # freeze weights after pruning
         # alpha_layer.freeze_module()
@@ -194,7 +196,7 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device):
 
         cost_matrices, masks1, masks2 = cost_builder(node_repr_b1, graph_repr_b1, batch1.batch, node_repr_b2, graph_repr_b2, batch2.batch)
 
-        soft_assignments, _ = alpha_layer(graph_repr_b1, graph_repr_b2)
+        soft_assignments, _, _ = alpha_layer(graph_repr_b1, graph_repr_b2)
         
         assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
         soft_assignments = soft_assignments * assignment_masks
@@ -262,10 +264,18 @@ def main(args):
     siamese_val_loader = DataLoader(siamese_val, batch_size=len(siamese_val), shuffle=False, num_workers=0)
     siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 192, shuffle=False, num_workers=10)
 
+    # if loading ckpt:
+    ckpt = torch.load(f'{args.output_dir}/checkpoint_encoder_debug.pth', map_location=device)
+
     embedding_dim = 64
     encoder = Model(num_features, embedding_dim, 1, use_attention=False, attn_concat=False).to(device)
+    encoder_optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-6) # added AdamW
 
-    encoder = train_triplet_network(triplet_loader, encoder, device, args)
+    encoder.load_state_dict(ckpt["encoder"])
+
+    encoder.eval()
+
+    # encoder = train_triplet_network(triplet_loader, encoder, encoder_optimizer, device, args)
     encoder.freeze_params(encoder)
 
     max_graph_size = max([g.num_nodes for g in dataset])
@@ -277,7 +287,7 @@ def main(args):
     model = AlphaMLP(encoder.output_dim, k)
     # model = AlphaCrossAttention(encoder.output_dim, k)
     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
-    alpha_tracker = AlphaTracker(k, warmup=100, window=50)
+    alpha_tracker = AlphaTracker(k, warmup=10, window=5)
     model_indel = IndelBilinear(encoder.output_dim, bias=True)
 
     cost_builder = CostMatrixBuilder(
