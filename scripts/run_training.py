@@ -85,7 +85,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
 
     for epoch in range(epochs):
 
-        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, history=history)
+        train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, epoch, history=history)
 
         if epoch % 10 == 0:
             average_val_loss = eval_ged(val_loader, encoder, alpha_layer, cost_builder, criterion, device)
@@ -104,7 +104,7 @@ def train_siamese_network(train_loader, val_loader, test_loader, encoder, alpha_
     # }, f'{args.output_dir}/checkpoint_ged_debug.pth')
 
 
-def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, history=None):
+def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, optimizer, device, epoch, lambda0=0.01, tau=50, history=None):
     alpha_layer.train()
     criterion.train()
 
@@ -147,7 +147,9 @@ def train_ged(train_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost
         # normalized_predicted_ged = predicted_ged / normalization_factor
         normalized_predicted_ged = torch.exp(- predicted_ged / normalization_factor)
 
-        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean') - 0.01 * entropy 
+        # lambda_ent = lambda0 * torch.exp(-epoch / tau)
+
+        loss = F.mse_loss(normalized_predicted_ged, ged_labels, reduction='mean') #- lambda_ent * entropy
         # λ_ent = λ0 * exp(-epoch / τ)
         # λ0 ≈ 0.01 – 0.05
         # τ ≈ 50–100 epochs
