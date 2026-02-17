@@ -19,10 +19,32 @@ from torch_geometric.data import Batch
 from torch.utils.data import random_split, ConcatDataset
 from torch_geometric.utils import to_networkx
 from torch_geometric.datasets import TUDataset, GEDDataset
+from torch_geometric.transforms import Constant
 
 from sklearn.metrics import f1_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
+
+
+def load_datasets(dataset):
+    train_dataset = GEDDataset(root=f'./data/datasets/{dataset}', name=dataset, train=True)
+    test_dataset = GEDDataset(root=f'./data/datasets/{dataset}', name=dataset, train=False)
+
+    if 'x' not in train_dataset[0]:
+        train_dataset.transform = Constant(value=1.0)
+        test_dataset.transform = Constant(value=1.0)
+
+    dataset = ConcatDataset([train_dataset, test_dataset])
+    
+    return train_dataset, test_dataset, dataset
+
+
+def split_train_val(train_dataset, val_ratio=0.25, seed=42):
+    train_size = int((1 - val_ratio) * len(train_dataset))
+    val_size = len(train_dataset) - train_size
+    generator = torch.Generator().manual_seed(seed)
+    train_split, val_split = random_split(train_dataset, [train_size, val_size], generator=generator)
+    return sorted(train_split.indices), sorted(val_split.indices)
 
 
 def compute_cost_matrices(node_repr_b1, counts1, node_repr_b2, counts2):

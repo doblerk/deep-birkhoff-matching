@@ -17,15 +17,16 @@ from birkhoffnet.losses.ged_loss import GEDLoss
 from birkhoffnet.utils.permutation import PermutationPool
 from birkhoffnet.models.indels_layers import IndelBilinear
 from birkhoffnet.models.alpha_layers import AlphaPermutationLayer, AlphaMLP, AlphaBilinear, AlphaCrossAttention
-from birkhoffnet.utils.train_utils import AlphaTracker
+from birkhoffnet.utils.callbacks import AlphaTracker
 from birkhoffnet.models.cost_matrix_builder import CostMatrixBuilder
 from birkhoffnet.utils.diagnostics import accumulate_epoch_stats, \
                                        batched_diagnostics, \
                                        plot_history
-from birkhoffnet.utils.data_utils import ged_matrix_to_dict, \
-                                      compute_cost_matrices, \
-                                      pad_cost_matrices, \
-                                      get_node_masks
+from birkhoffnet.utils.data_utils import load_datasets, split_train_val
+from birkhoffnet.utils.trainer_utils import TrainingConfig
+from birkhoffnet.utils.dataloader_utils import DataLoaders
+from birkhoffnet.utils.model_utils import ModelFactory
+from birkhoffnet.utils.trainer_utils import TripletTrainer, SiameseTrainer
 
 
 def train_triplet_network(loader, encoder, optimizer, device, args, epochs=2001):
@@ -226,83 +227,132 @@ def get_args_parser():
     return parser
 
 
+# def main(args):
+
+#     train_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=True)
+#     test_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=False)
+
+#     if 'x' not in train_dataset[0]:
+#         train_dataset.transform = Constant(value=1.0)
+#         test_dataset.transform = Constant(value=1.0)
+    
+#     dataset = ConcatDataset([train_dataset, test_dataset])
+
+#     num_features = train_dataset.num_features
+
+#     ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
+#     norm_ged_matrix = torch.exp(-norm_ged_matrix) # -> range (0, 1] ?
+
+#     train_size = int(0.75 * len(train_dataset))
+#     val_size = len(train_dataset) - train_size
+    
+#     generator = torch.Generator().manual_seed(42)
+#     train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size], generator=generator)
+#     train_dataset_indices, val_dataset_indices = sorted(train_dataset.indices), sorted(val_dataset.indices)
+
+#     ged_dict = ged_matrix_to_dict(norm_ged_matrix)
+
+#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+#     p = int(len(train_dataset) * 0.4) # before 0.25
+
+#     triplet_train = TripletDataset(dataset, train_dataset_indices, ged_dict, k=p)
+#     triplet_loader = DataLoader(triplet_train, batch_size=len(triplet_train), shuffle=True, num_workers=0)
+
+#     siamese_train = SiameseDataset(dataset, norm_ged_matrix, pair_mode='train', train_indices=train_dataset_indices)
+#     siamese_val = SiameseDataset(dataset, norm_ged_matrix, pair_mode='val', train_indices=train_dataset_indices, val_indices=val_dataset_indices)
+#     siamese_test = SiameseDataset(dataset, norm_ged_matrix, pair_mode='test', train_indices=train_dataset_indices, test_indices=test_dataset.i)
+
+#     siamese_train_loader = DataLoader(siamese_train, batch_size=len(siamese_train), shuffle=True, num_workers=0)
+#     siamese_val_loader = DataLoader(siamese_val, batch_size=len(siamese_val), shuffle=False, num_workers=0)
+#     siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 192, shuffle=False, num_workers=10)
+
+#     # if loading ckpt:
+#     # ckpt = torch.load(f'{args.output_dir}/checkpoint_encoder_debug.pth', map_location=device)
+
+#     embedding_dim = 64
+#     encoder = Model(num_features, embedding_dim, 1, use_attention=False, attn_concat=False).to(device)
+#     encoder_optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-6) # added AdamW
+
+#     # encoder.load_state_dict(ckpt["encoder"])
+#     # encoder.eval()
+
+#     encoder = train_triplet_network(triplet_loader, encoder, encoder_optimizer, device, args)
+#     # encoder.freeze_params(encoder)
+
+#     max_graph_size = max([g.num_nodes for g in dataset])
+#     k = args.k
+
+#     perm_pool = PermutationPool(max_n=max_graph_size, k=k)
+#     perm_matrices = perm_pool.get_matrix_batch().to(device)
+
+#     model = AlphaMLP(encoder.output_dim, k)
+#     # model = AlphaCrossAttention(encoder.output_dim, k)
+#     alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
+#     alpha_tracker = AlphaTracker(k, warmup=10, window=5)
+#     model_indel = IndelBilinear(encoder.output_dim, bias=True)
+
+#     cost_builder = CostMatrixBuilder(
+#         embedding_dim=embedding_dim,
+#         max_graph_size=max_graph_size,
+#         use_learned_sub=False,
+#         model_indel=None,
+#         rank=None
+#     ).to(device)
+
+#     criterion = GEDLoss().to(device)
+
+#     train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args)
+
 def main(args):
-
-    train_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=True)
-    test_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=False)
-
-    if 'x' not in train_dataset[0]:
-        train_dataset.transform = Constant(value=1.0)
-        test_dataset.transform = Constant(value=1.0)
-    
-    dataset = ConcatDataset([train_dataset, test_dataset])
-
-    num_features = train_dataset.num_features
-
-    ged_matrix, norm_ged_matrix = train_dataset.ged, train_dataset.norm_ged
-    norm_ged_matrix = torch.exp(-norm_ged_matrix) # -> range (0, 1] ?
-
-    train_size = int(0.75 * len(train_dataset))
-    val_size = len(train_dataset) - train_size
-    
-    generator = torch.Generator().manual_seed(42)
-    train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size], generator=generator)
-    train_dataset_indices, val_dataset_indices = sorted(train_dataset.indices), sorted(val_dataset.indices)
-
-    ged_dict = ged_matrix_to_dict(norm_ged_matrix)
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    p = int(len(train_dataset) * 0.4) # before 0.25
+    # 1. Load datasets
+    train_dataset, test_dataset, dataset = load_datasets(args.dataset)
 
-    triplet_train = TripletDataset(dataset, train_dataset_indices, ged_dict, k=p)
-    triplet_loader = DataLoader(triplet_train, batch_size=len(triplet_train), shuffle=True, num_workers=0)
+    # 2. Train/val split
+    train_indices, val_indices = split_train_val(train_dataset)
 
-    siamese_train = SiameseDataset(dataset, norm_ged_matrix, pair_mode='train', train_indices=train_dataset_indices)
-    siamese_val = SiameseDataset(dataset, norm_ged_matrix, pair_mode='val', train_indices=train_dataset_indices, val_indices=val_dataset_indices)
-    siamese_test = SiameseDataset(dataset, norm_ged_matrix, pair_mode='test', train_indices=train_dataset_indices, test_indices=test_dataset.i)
+    # 3. Instantiate DataLoaders class
+    loaders = DataLoaders(dataset, train_indices, val_indices, test_dataset.i, train_dataset.norm_ged)
 
-    siamese_train_loader = DataLoader(siamese_train, batch_size=len(siamese_train), shuffle=True, num_workers=0)
-    siamese_val_loader = DataLoader(siamese_val, batch_size=len(siamese_val), shuffle=False, num_workers=0)
-    siamese_test_loader = DataLoader(siamese_test, batch_size=64 * 192, shuffle=False, num_workers=10)
+    # 4. Instantiate TrainingConfig dataclass
+    config = TrainingConfig(device=device, embedding_dim=64, k=args.k)
 
-    # if loading ckpt:
-    ckpt = torch.load(f'{args.output_dir}/checkpoint_encoder_debug.pth', map_location=device)
+    # 5. Initialize models
+    max_graph_size = max([g.num_nodes for g in dataset])
+    components = ModelFactory.initialize(
+        num_features=train_dataset.num_features,
+        embedding_dim=config.embedding_dim,
+        max_graph_size=max_graph_size,
+        k=config.k,
+        device=config.device
+    )
 
-    embedding_dim = 64
-    encoder = Model(num_features, embedding_dim, 1, use_attention=False, attn_concat=False).to(device)
-    encoder_optimizer = torch.optim.AdamW(encoder.parameters(), lr=1e-3, weight_decay=1e-6) # added AdamW
+    triplet_trainer = TripletTrainer(
+        components.encoder,
+        components.encoder_optimizer,
+        config=None, # ADAPT HERE
+    )
 
-    encoder.load_state_dict(ckpt["encoder"])
-
-    encoder.eval()
-
-    # encoder = train_triplet_network(triplet_loader, encoder, encoder_optimizer, device, args)
+    encoder = triplet_trainer.train(loaders.triplet_loader)
     encoder.freeze_params(encoder)
 
-    max_graph_size = max([g.num_nodes for g in dataset])
-    k = args.k
+    siamese_trainer = SiameseTrainer(
+        components.encoder,
+        components.alpha_layer,
+        components.alpha_tracker,
+        components.perm_pool,
+        components.cost_builder,
+        components.criterion,
+        config=None,
+    )
 
-    perm_pool = PermutationPool(max_n=max_graph_size, k=k)
-    perm_matrices = perm_pool.get_matrix_batch().to(device)
-
-    model = AlphaMLP(encoder.output_dim, k)
-    # model = AlphaCrossAttention(encoder.output_dim, k)
-    alpha_layer = AlphaPermutationLayer(perm_matrices, model).to(device)
-    alpha_tracker = AlphaTracker(k, warmup=10, window=5)
-    model_indel = IndelBilinear(encoder.output_dim, bias=True)
-
-    cost_builder = CostMatrixBuilder(
-        embedding_dim=embedding_dim,
-        max_graph_size=max_graph_size,
-        use_learned_sub=False,
-        model_indel=None,
-        rank=None
-    ).to(device)
-
-    criterion = GEDLoss().to(device)
-
-    train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args)
+    siamese_trainer.train(
+        loaders.train_loader,
+        loaders.val_loader,
+        loaders.test_loader,
+    )  
 
 
 if __name__ == '__main__':

@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Tuple
-from birkhoffnet.utils.permutation import PermutationPool
-
 
 class AlphaTracker:
     def __init__(self, k: int, warmup: int = 100, window: int = 50, ema_decay : float = 0.0):
