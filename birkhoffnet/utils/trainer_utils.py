@@ -1,23 +1,8 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
-from dataclasses import dataclass
+from birkhoffnet.utils.config import Config
 from birkhoffnet.losses.triplet_loss import TripletLoss
-
-
-# =========================================================
-# Configuration
-# =========================================================
-
-@dataclass
-class TrainingConfig:
-    device: torch.device
-    epochs_triplet: int = 2001
-    epochs_siamese: int = 201
-    lr: float = 1e-3
-    weight_decay: float = 1e-6
-    triplet_margin: float = 0.8
-    output_dir: str = "./"
 
 
 # =========================================================
@@ -26,17 +11,17 @@ class TrainingConfig:
 
 class TripletTrainer:
 
-    def __init__(self, encoder: torch.nn.Module, optimizer, config: TrainingConfig):
+    def __init__(self, encoder: torch.nn.Module, optimizer, config: Config):
         self.encoder = encoder
         self.optimizer = optimizer
         self.config = config
-        self.criterion = TripletLoss(margin=config.triplet_margin)
+        self.criterion = TripletLoss(margin=config.training.triplet_margin)
 
     def train(self, loader):
 
         self.encoder.train()
 
-        for epoch in range(self.config.epochs_triplet):
+        for epoch in range(self.config.training.epochs_triplet):
 
             total_loss = 0
             total_samples = 0
@@ -65,7 +50,7 @@ class TripletTrainer:
             avg_loss = total_loss / total_samples
 
             if epoch % 10 == 0:
-                print(f"[Triplet] Epoch {epoch+1}/{self.config.epochs_triplet} - Loss: {avg_loss:.4f}")
+                print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet} - Loss: {avg_loss:.4f}")
 
         self._save_checkpoint()
         return self.encoder
@@ -91,7 +76,7 @@ class SiameseTrainer:
         perm_pool,
         cost_builder,
         criterion,
-        config: TrainingConfig,
+        config: Config,
     ):
         self.encoder = encoder
         self.alpha_layer = alpha_layer

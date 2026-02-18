@@ -23,7 +23,7 @@ from birkhoffnet.utils.diagnostics import accumulate_epoch_stats, \
                                        batched_diagnostics, \
                                        plot_history
 from birkhoffnet.utils.data_utils import load_datasets, split_train_val
-from birkhoffnet.utils.trainer_utils import TrainingConfig
+from birkhoffnet.utils.config import load_config
 from birkhoffnet.utils.dataloader_utils import DataLoaders
 from birkhoffnet.utils.model_utils import ModelFactory
 from birkhoffnet.utils.trainer_utils import TripletTrainer, SiameseTrainer
@@ -221,9 +221,10 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device):
 
 def get_args_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, help='Dataset name')
-    parser.add_argument('--output_dir', type=str, help='Path to output directory')
-    parser.add_argument('--k', type=int, default=21, help='Number of generated permutation matrices')
+    parser.add_argument('--params', type=str, help='Path to parameters file')
+    # parser.add_argument('--dataset', type=str, help='Dataset name')
+    # parser.add_argument('--output_dir', type=str, help='Path to output directory')
+    # parser.add_argument('--k', type=int, default=21, help='Number of generated permutation matrices')
     return parser
 
 
@@ -305,10 +306,12 @@ def get_args_parser():
 #     train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args)
 
 def main(args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    config = load_config(args.params)
+
+    device = torch.device(config.device)
 
     # 1. Load datasets
-    train_dataset, test_dataset, dataset = load_datasets(args.dataset)
+    train_dataset, test_dataset, dataset = load_datasets(config.dataset)
 
     # 2. Train/val split
     train_indices, val_indices = split_train_val(train_dataset)
@@ -316,23 +319,18 @@ def main(args):
     # 3. Instantiate DataLoaders class
     loaders = DataLoaders(dataset, train_indices, val_indices, test_dataset.i, train_dataset.norm_ged)
 
-    # 4. Instantiate TrainingConfig dataclass
-    config = TrainingConfig(device=device, embedding_dim=64, k=args.k)
-
     # 5. Initialize models
     max_graph_size = max([g.num_nodes for g in dataset])
     components = ModelFactory.initialize(
         num_features=train_dataset.num_features,
-        embedding_dim=config.embedding_dim,
         max_graph_size=max_graph_size,
-        k=config.k,
-        device=config.device
+        config=config
     )
 
     triplet_trainer = TripletTrainer(
         components.encoder,
         components.encoder_optimizer,
-        config=None, # ADAPT HERE
+        config=config
     )
 
     encoder = triplet_trainer.train(loaders.triplet_loader)
@@ -345,14 +343,14 @@ def main(args):
         components.perm_pool,
         components.cost_builder,
         components.criterion,
-        config=None,
+        config=config,
     )
 
     siamese_trainer.train(
         loaders.train_loader,
         loaders.val_loader,
         loaders.test_loader,
-    )  
+    ) 
 
 
 if __name__ == '__main__':
