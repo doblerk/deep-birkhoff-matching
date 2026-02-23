@@ -328,8 +328,8 @@ def main(args):
     )
 
     triplet_trainer = TripletTrainer(
-        components.encoder,
-        components.encoder_optimizer,
+        components.modules.encoder,
+        components.optimizers.encoder,
         config=config
     )
 
@@ -337,11 +337,11 @@ def main(args):
     encoder.freeze_params(encoder)
 
     siamese_trainer = SiameseTrainer(
-        components.encoder,
-        components.alpha_layer,
+        encoder,
+        components.modules.alpha_layer,
         components.alpha_tracker,
         components.perm_pool,
-        components.cost_builder,
+        components.modules.cost_builder,
         components.criterion,
         config=config,
     )
@@ -350,7 +350,7 @@ def main(args):
         loaders.train_loader,
         loaders.val_loader,
         loaders.test_loader,
-    ) 
+    )
 
 
 if __name__ == '__main__':

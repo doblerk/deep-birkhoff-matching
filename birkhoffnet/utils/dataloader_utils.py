@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import DataLoader
+from torch_geometric.loader import DataLoader
 from birkhoffnet.utils.data_utils import ged_matrix_to_dict
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
 from birkhoffnet.datasets.triplet_dataset import TripletDataset

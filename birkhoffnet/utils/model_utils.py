@@ -3,7 +3,7 @@ import torch
 from birkhoffnet.models.gnn_models import Model
 from birkhoffnet.losses.ged_loss import GEDLoss
 from birkhoffnet.utils.config import Config
-from birkhoffnet.utils.components import ModelComponents
+from birkhoffnet.utils.components import ModelComponents, ModelModules, Optimizers
 from birkhoffnet.utils.callbacks import AlphaTracker
 from birkhoffnet.utils.permutation import PermutationPool
 from birkhoffnet.models.alpha_layers import AlphaPermutationLayer, AlphaMLP
@@ -18,7 +18,9 @@ class ModelFactory:
         encoder = Model(
             num_features,
             config.model.embedding_dim,
-            config.model.num_layers
+            config.model.num_layers,
+            use_attention=False,
+            attn_concat=False
         ).to(config.device)
 
         encoder_optimizer = torch.optim.AdamW(
@@ -56,11 +58,15 @@ class ModelFactory:
         criterion = GEDLoss().to(config.device)
 
         return ModelComponents(
-            encoder=encoder,
-            encoder_optimizer=encoder_optimizer,
-            alpha_layer=alpha_layer,
+            modules=ModelModules(
+                encoder=encoder,
+                alpha_layer=alpha_layer,
+                cost_builder=cost_builder
+            ),
+            optimizers=Optimizers(
+                encoder=encoder_optimizer
+            ),
             alpha_tracker=alpha_tracker,
             perm_pool=perm_pool,
-            cost_builder=cost_builder,
             criterion=criterion
         )

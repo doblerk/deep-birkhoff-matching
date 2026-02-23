@@ -90,8 +90,8 @@ class SiameseTrainer:
             list(alpha_layer.parameters())
             + list(cost_builder.parameters())
             + list(criterion.parameters()),
-            lr=config.lr,
-            weight_decay=config.weight_decay,
+            lr=config.training.lr,
+            weight_decay=config.training.weight_decay,
         )
 
     # --------------------------------------------------------
@@ -100,14 +100,14 @@ class SiameseTrainer:
 
     def train(self, train_loader, val_loader, test_loader):
 
-        for epoch in range(self.config.epochs_siamese):
+        for epoch in range(self.config.training.epochs_siamese):
 
             self._train_one_epoch(train_loader, epoch)
 
             if epoch % 10 == 0:
                 val_loss = self.evaluate(val_loader)
                 print(
-                    f"[GED] Epoch {epoch+1}/{self.config.epochs_siamese} "
+                    f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
                     f"- Val MSE: {val_loss:.4f} "
                     f"- RMSE: {np.sqrt(val_loss):.4f} "
                     f"- Scale: {self.criterion.scale.item():.4f}"
