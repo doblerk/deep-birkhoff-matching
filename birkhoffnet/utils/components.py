@@ -5,6 +5,7 @@ from dataclasses import dataclass
 @dataclass
 class Optimizers:
     encoder: torch.optim.Optimizer
+    encoder_scheduler: torch.optim.lr_scheduler
 
 
 @dataclass

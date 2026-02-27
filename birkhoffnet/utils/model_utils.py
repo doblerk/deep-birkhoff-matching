@@ -29,6 +29,12 @@ class ModelFactory:
             weight_decay=config.training.weight_decay
         )
 
+        encoder_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            encoder_optimizer,
+            T_max=config.training.epochs_triplet,
+            eta_min=1e-8
+        )
+
         perm_pool = PermutationPool(
             max_n=max_graph_size,
             k=config.model.k
@@ -64,7 +70,8 @@ class ModelFactory:
                 cost_builder=cost_builder
             ),
             optimizers=Optimizers(
-                encoder=encoder_optimizer
+                encoder=encoder_optimizer,
+                encoder_scheduler=encoder_scheduler
             ),
             alpha_tracker=alpha_tracker,
             perm_pool=perm_pool,

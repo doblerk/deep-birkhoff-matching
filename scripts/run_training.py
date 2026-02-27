@@ -327,17 +327,24 @@ def main(args):
         config=config
     )
 
-    triplet_trainer = TripletTrainer(
-        components.modules.encoder,
-        components.optimizers.encoder,
-        config=config
-    )
+    # triplet_trainer = TripletTrainer(
+    #     components.modules.encoder,
+    #     components.optimizers.encoder,
+    #     components.optimizers.encoder_scheduler,
+    #     config=config
+    # )
 
-    encoder = triplet_trainer.train(loaders.triplet_loader)
-    encoder.freeze_params(encoder)
+    # encoder = triplet_trainer.train(loaders.triplet_loader)
+    # encoder.freeze_params(encoder)
+
+    ckpt = torch.load(f'{config.output_dir}/checkpoint_encoder_debug.pth', map_location=device)
+
+    components.modules.encoder.load_state_dict(ckpt["encoder"])
+    components.optimizers.encoder.load_state_dict(ckpt["optimizer"])
+    components.modules.encoder.eval()
 
     siamese_trainer = SiameseTrainer(
-        encoder,
+        components.modules.encoder,
         components.modules.alpha_layer,
         components.alpha_tracker,
         components.perm_pool,

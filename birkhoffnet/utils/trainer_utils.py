@@ -11,9 +11,14 @@ from birkhoffnet.losses.triplet_loss import TripletLoss
 
 class TripletTrainer:
 
-    def __init__(self, encoder: torch.nn.Module, optimizer, config: Config):
+    def __init__(self, 
+                 encoder: torch.nn.Module, 
+                 optimizer: torch.optim.Optimizer, 
+                 scheduler: torch.optim.lr_scheduler, 
+                 config: Config):
         self.encoder = encoder
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.config = config
         self.criterion = TripletLoss(margin=config.training.triplet_margin)
 
@@ -48,6 +53,8 @@ class TripletTrainer:
                 total_samples += batch_size
 
             avg_loss = total_loss / total_samples
+
+            self.scheduler.step()
 
             if epoch % 10 == 0:
                 print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet} - Loss: {avg_loss:.4f}")
@@ -158,6 +165,7 @@ class SiameseTrainer:
             )
 
             self.alpha_tracker.collect(alphas)
+            print(alphas.mean(0)[0].item())
 
             assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
             soft_assignments = soft_assignments * assignment_masks
@@ -168,7 +176,9 @@ class SiameseTrainer:
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
 
-            loss = F.mse_loss(normalized_predicted, ged_labels, reduction="mean")
+            lambda_ent = 0.02 * torch.exp(torch.tensor(-epoch / 50))
+
+            loss = F.mse_loss(normalized_predicted, ged_labels, reduction="mean") - lambda_ent * entropy
 
             loss.backward()
             self.optimizer.step()
