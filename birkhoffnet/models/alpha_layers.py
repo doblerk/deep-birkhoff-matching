@@ -134,27 +134,26 @@ class AlphaPermutationLayer(nn.Module):
         return F.softmax(alpha_logits / self.temperature, dim=1)
     
     def freeze_module(self):
-        for p in self.model.parameters():
-            p.requires_grad = False
-        self._frozen = True
+        if not self._frozen:
+            for p in self.model.parameters():
+                p.requires_grad = False
+            self._frozen = True
+            self.freeze_timer = self.freeze_epochs
     
     def unfreeze_module(self):
-        for p in self.model.parameters():
-            p.requires_grad = True
-        self._frozen = False
-    
-    def start_freeze_timer(self):
-        self.freeze_timer = self.freeze_epochs
+        if self._frozen:
+            for p in self.model.parameters():
+                p.requires_grad = True
+            self._frozen = False
     
     def update_freeze_timer(self):
-        if self.freeze_timer > 0:
+        if self._frozen:
             self.freeze_timer -= 1
+            if self.freeze_timer <= 0:
+                self.unfreeze_module()
     
     def reset_freeze_timer(self):
         self.freeze_counter = self.freeze_epochs
-    
-    def is_frozen(self):
-        return self._frozen
     
     def entropy_loss(self, alphas: torch.Tensor) -> torch.Tensor:
         entropy = - (alphas * torch.log(alphas + 1e-8)).sum(dim=1)

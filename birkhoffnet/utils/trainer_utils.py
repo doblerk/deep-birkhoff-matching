@@ -106,25 +106,28 @@ class SiameseTrainer:
     # --------------------------------------------------------
 
     def train(self, train_loader, val_loader, test_loader):
-
+        val_losses = []
         for epoch in range(self.config.training.epochs_siamese):
 
             self._train_one_epoch(train_loader, epoch)
 
-            if epoch % 10 == 0:
+            if epoch % 1 == 0:
                 val_loss = self.evaluate(val_loader)
-                print(
-                    f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
-                    f"- Val MSE: {val_loss:.4f} "
-                    f"- RMSE: {np.sqrt(val_loss):.4f} "
-                    f"- Scale: {self.criterion.scale.item():.4f}"
-                )
+                # print(
+                #     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
+                #     f"- Val MSE: {val_loss:.4f} "
+                #     f"- RMSE: {np.sqrt(val_loss):.4f} "
+                #     f"- Scale: {self.criterion.scale.item():.4f}"
+                # )
+                val_losses.append(val_loss)
 
-        test_loss = self.evaluate(test_loader)
-        print(
-            f"[GED] Final Test MSE: {test_loss:.4f} "
-            f"- RMSE: {np.sqrt(test_loss):.4f}"
-        )
+        # test_loss = self.evaluate(test_loader)
+        # print(
+        #     f"[GED] Final Test MSE: {test_loss:.4f} "
+        #     f"- RMSE: {np.sqrt(test_loss):.4f}"
+        # )
+        np.save(f"{self.config.output_dir}/model6_run5.npy", np.array(val_losses))
+        print("done!")
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -165,7 +168,7 @@ class SiameseTrainer:
             )
 
             self.alpha_tracker.collect(alphas)
-            print(alphas.mean(0)[0].item())
+            # print(alphas.mean(0)[0].item())
 
             assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
             soft_assignments = soft_assignments * assignment_masks
@@ -185,17 +188,10 @@ class SiameseTrainer:
 
         sorted_idx, _ = self.alpha_tracker.update()
         if sorted_idx is not None:
-            self.perm_pool.mate_permutations(sorted_idx, k=2)
-            # self.alpha_layer.freeze_module()
-            # self.alpha_layer.start_freeze_timer()
+            self.perm_pool.mate_permutations(sorted_idx, k=8)
+        #     self.alpha_layer.freeze_module()
         
-        # if alpha_layer.is_frozen():
-        #     alpha_layer.update_freeze_timer()
-
-        #     if alpha_layer.freeze_timer == 0:
-        #         alpha_layer.unfreeze_module()
-        #         alpha_layer.reset_freeze_timer()
-
+        # self.alpha_layer.update_freeze_timer()
 
     # --------------------------------------------------------
     # Evaluation
