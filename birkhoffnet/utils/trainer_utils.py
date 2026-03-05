@@ -106,28 +106,28 @@ class SiameseTrainer:
     # --------------------------------------------------------
 
     def train(self, train_loader, val_loader, test_loader):
-        val_losses = []
+        # val_losses = []
         for epoch in range(self.config.training.epochs_siamese):
 
             self._train_one_epoch(train_loader, epoch)
 
             if epoch % 1 == 0:
                 val_loss = self.evaluate(val_loader)
-                # print(
-                #     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
-                #     f"- Val MSE: {val_loss:.4f} "
-                #     f"- RMSE: {np.sqrt(val_loss):.4f} "
-                #     f"- Scale: {self.criterion.scale.item():.4f}"
-                # )
-                val_losses.append(val_loss)
+                print(
+                    f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
+                    f"- Val MSE: {val_loss:.4f} "
+                    f"- RMSE: {np.sqrt(val_loss):.4f} "
+                    f"- Scale: {self.criterion.scale.item():.4f}"
+                )
+                # val_losses.append(val_loss)
 
-        # test_loss = self.evaluate(test_loader)
-        # print(
-        #     f"[GED] Final Test MSE: {test_loss:.4f} "
-        #     f"- RMSE: {np.sqrt(test_loss):.4f}"
-        # )
-        np.save(f"{self.config.output_dir}/model6_run5.npy", np.array(val_losses))
-        print("done!")
+        test_loss = self.evaluate(test_loader)
+        print(
+            f"[GED] Final Test MSE: {test_loss:.4f} "
+            f"- RMSE: {np.sqrt(test_loss):.4f}"
+        )
+        # np.save(f"{self.config.output_dir}/model6_run5.npy", np.array(val_losses))
+        # print("done!")
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -163,12 +163,13 @@ class SiameseTrainer:
                 node_repr_b2, graph_repr_b2, batch2.batch
             )
 
-            soft_assignments, alphas, entropy = self.alpha_layer(
+            soft_assignments, alphas = self.alpha_layer(
                 graph_repr_b1, graph_repr_b2
             )
 
-            self.alpha_tracker.collect(alphas)
-            # print(alphas.mean(0)[0].item())
+            # Track alpha usage
+            if self.config.perm_evo.evolve:
+                self.alpha_tracker.collect(alphas)
 
             assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
             soft_assignments = soft_assignments * assignment_masks
@@ -179,19 +180,50 @@ class SiameseTrainer:
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
 
-            lambda_ent = 0.02 * torch.exp(torch.tensor(-epoch / 50))
-
-            loss = F.mse_loss(normalized_predicted, ged_labels, reduction="mean") - lambda_ent * entropy
+            loss = self.alpha_layer.mse_loss(
+                normalized_predicted, 
+                ged_labels, 
+                use_entropy=self.config.training.use_entropy, 
+                alphas=alphas,
+                epoch=epoch,
+                entropy_weight=self.config.training.entropy_weight
+            )
 
             loss.backward()
             self.optimizer.step()
-
-        sorted_idx, _ = self.alpha_tracker.update()
-        if sorted_idx is not None:
-            self.perm_pool.mate_permutations(sorted_idx, k=8)
-        #     self.alpha_layer.freeze_module()
         
-        # self.alpha_layer.update_freeze_timer()
+        # ----------------------------------
+        # Genetic permutation evolution
+        # ----------------------------------
+
+        evolved = False
+
+        if self.config.perm_evo.evolve:
+
+            sorted_idx = self.alpha_tracker.update()
+
+            if sorted_idx is not None:
+                
+                n_replace = self.config.perm_evo.num_replace
+
+                self.perm_pool.mate_permutations(
+                    sorted_idx, 
+                    k=n_replace
+                )
+
+                new_perms = self.perm_pool.get_vectors()
+                self.alpha_layer.set_permutations(new_perms)
+
+                # print("Vectors match:", torch.equal(self.perm_pool.get_vectors(), self.alpha_layer.perm_vectors))
+          
+                if self.config.perm_evo.freeze_after_evolve:
+                    self.alpha_layer.freeze_module()
+                
+                evolved = True
+                print("Permutations are changed.")
+        
+        if not evolved:
+            self.alpha_layer.update_freeze_timer()
 
     # --------------------------------------------------------
     # Evaluation
@@ -229,7 +261,7 @@ class SiameseTrainer:
                 node_repr_b2, graph_repr_b2, batch2.batch
             )
 
-            soft_assignments, _, _ = self.alpha_layer(
+            soft_assignments, alphas = self.alpha_layer(
                 graph_repr_b1, graph_repr_b2
             )
 
@@ -241,7 +273,10 @@ class SiameseTrainer:
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
 
-            loss = F.mse_loss(normalized_predicted, ged_labels)
+            loss = self.alpha_layer.mse_loss(
+                normalized_predicted, 
+                ged_labels
+            )
 
             total_loss += loss.item() * ged_labels.size(0)
             total_samples += ged_labels.size(0)

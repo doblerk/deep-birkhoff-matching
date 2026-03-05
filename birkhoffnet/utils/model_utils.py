@@ -37,13 +37,19 @@ class ModelFactory:
 
         perm_pool = PermutationPool(
             max_n=max_graph_size,
-            k=config.model.k
+            k=config.model.k,
+            config=config
         )
 
-        perm_matrices = perm_pool.get_matrix_batch().to(config.device)
+        if config.model.perm_strategy == "offline_hungarian":
+            perm_pool.initialize("random")
+        else:
+            perm_pool.initialize(config.model.perm_strategy)
+
+        perm_vectors = perm_pool.get_vectors().to(config.device)
 
         alpha_layer = AlphaPermutationLayer(
-            perm_matrices,
+            perm_vectors,
             AlphaMLP(encoder.output_dim, config.model.k)
         ).to(config.device)
 

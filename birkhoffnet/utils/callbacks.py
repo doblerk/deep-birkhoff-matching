@@ -21,21 +21,23 @@ class AlphaTracker:
 
         self.epoch_total = 0        # lifetime epoch counter
         self.epoch_in_window = 0    # counter since last reset
-        
-        # stores mean alpha per epoch
-        self.history = []
-        # stores batch-wise alphas within an epoch
-        self._epoch_accum = []
 
-        # for EMA smoothing
-        self._ema_mean = torch.zeros(k)
+        self._batch_sum = torch.zeros(k)
+        self._batch_count = 0
+
+        self._window_sum = torch.zeros(k)
+
+        self._ema = torch.zeros(k)
 
     def collect(self, alphas: torch.Tensor):
-        """
-        Collects alphas from one batch only after warmup. """
-        if self.epoch_total > self.warmup:
-            self.epoch_in_window += 1
-            self._epoch_accum.append(alphas.detach().cpu())
+        """ Collects alphas from one batch only after warmup. """
+        if self.epoch_total <= self.warmup:
+            return
+
+        mean = alphas.mean(dim=0).detach().cpu()
+
+        self._batch_sum += mean
+        self._batch_count += 1
 
     def update(self, top_m: int = 2, strategy: str = 'mean'):
         """
@@ -44,29 +46,37 @@ class AlphaTracker:
         """
         self.epoch_total += 1
 
-        if len(self._epoch_accum) == 0:
-            return None, None
+        if self._batch_count == 0:
+            return None
 
-        epoch_mean = torch.cat(self._epoch_accum, dim=0).mean(dim=0)
-        self._epoch_accum.clear()
+        epoch_mean = self._batch_sum / self._batch_count
 
-        if self.ema_decay > 0.0:
-            self._ema_mean = self.ema_decay * self._ema_mean + (1 - self.ema_decay) * epoch_mean
-            epoch_mean = self._ema_mean
+        self._batch_sum.zero_()
+        self._batch_count = 0
+
+        if self.ema_decay > 0:
+            self._ema = self.ema_decay * self._ema + (1 - self.ema_decay) * epoch_mean
+            epoch_mean = self._ema
         
-        self.history.append(epoch_mean)
+        self._window_sum += epoch_mean
+        self.epoch_in_window += 1
 
-        # if self.epoch_total > self.warmup:
-            # mean_alphas = alphas.mean(dim=0) # (k,)
-            # self.history.append(mean_alphas)
+        if self.epoch_in_window < self.window:
+            return None
 
         # If window reached, rank and reset
-        if self.epoch_in_window == self.window:
-            ranking = self._rank_alphas(top_m, strategy)
-            self._reset_window()
-            return ranking
-        
-        return None, None
+        scores = self._window_sum / self.window
+        sorted_idx = torch.argsort(scores)
+
+        self._window_sum.zero_()
+        self.epoch_in_window = 0
+
+        return sorted_idx
+        # if self.epoch_in_window == self.window:
+        #     ranking = self._rank_alphas(top_m, strategy)
+        #     self._reset_window()
+        #     return ranking
+        # return None, None
     
     def _reset_window(self):
         """Clears history & reset epoch counter."""

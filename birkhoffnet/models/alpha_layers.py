@@ -110,20 +110,33 @@ class AlphaCrossAttention(nn.Module):
 
 class AlphaPermutationLayer(nn.Module):
    
-    def __init__(self, perm_matrices: torch.Tensor, model: nn.Module, temperature: float = 1.0, freeze_epochs: int = 2):
+    def __init__(
+            self, 
+            perm_vectors: torch.Tensor, 
+            model: nn.Module, 
+            temperature: float = 1.0, 
+            freeze_epochs: int = 2,
+            entropy_weight: float = 0.02
+    ):
         """
         Args:
             perm_matrices: tensor of fixed permutation matrices (k, n, n)
             model: alpha generator model that outputs logits (B, k)
         """
         super().__init__()
-        self.perm_matrices = perm_matrices
-        self.k = perm_matrices.size(0)
+
+        self.register_buffer("perm_vectors", perm_vectors.clone())
+
+        self.k, self.n = perm_vectors.shape
+
         self.temperature = temperature #nn.Parameter(torch.ones(1))
         self.model = model
+        
         self.freeze_epochs = freeze_epochs
         self.freeze_timer = 0
         self._frozen = False
+
+        self.entropy_weight = entropy_weight
 
     # @property
     # def temperature(self):
@@ -133,35 +146,92 @@ class AlphaPermutationLayer(nn.Module):
     def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
         return F.softmax(alpha_logits / self.temperature, dim=1)
     
+    def _set_requires_grad(self, flag: bool):
+        for p in self.model.parameters():
+            p.requires_grad_(flag)
+    
     def freeze_module(self):
         if not self._frozen:
-            for p in self.model.parameters():
-                p.requires_grad = False
+            self._set_requires_grad(False)
             self._frozen = True
-            self.freeze_timer = self.freeze_epochs
+            self.freeze_timer = self.freeze_epochs + 1
+            print("Freezing: ", self.freeze_timer)
     
     def unfreeze_module(self):
         if self._frozen:
-            for p in self.model.parameters():
-                p.requires_grad = True
+            self._set_requires_grad(True)
             self._frozen = False
     
     def update_freeze_timer(self):
-        if self._frozen:
-            self.freeze_timer -= 1
-            if self.freeze_timer <= 0:
-                self.unfreeze_module()
+        if not self._frozen:
+            return
+        print("Updating...")
+        self.freeze_timer -= 1
+        print(self.freeze_timer)
+        if self.freeze_timer <= 0:
+            print("Unfreezing...")
+            self.unfreeze_module()
+
+    def set_permutations(self, new_perm_vectors: torch.Tensor):
+        # self.perm_vectors = new_perm_vectors.to(self.perm_vectors.device)
+        self.perm_vectors.copy_(new_perm_vectors.to(self.perm_vectors.device))
     
-    def reset_freeze_timer(self):
-        self.freeze_counter = self.freeze_epochs
+    def get_entropy(self, alphas: torch.Tensor) -> torch.Tensor:
+        entropy = -(alphas * (alphas + 1e-8).log()).sum(dim=-1).mean()
+        return entropy
     
-    def entropy_loss(self, alphas: torch.Tensor) -> torch.Tensor:
-        entropy = - (alphas * torch.log(alphas + 1e-8)).sum(dim=1)
-        return entropy.mean()
+    def mse_loss(self, input, target, use_entropy=False, alphas=None, epoch=None, entropy_weight=None):
+        loss = F.mse_loss(input, target, reduction="mean")
+        if use_entropy and alphas is not None:
+            entropy = self.get_entropy(alphas)
+            weight = entropy_weight if entropy_weight is not None else self.entropy_weight
+            lambda_ent = weight * torch.exp(torch.tensor(-epoch / 50))
+            return loss - lambda_ent * entropy
+        return loss
 
     def forward(self, g1: torch.Tensor, g2: torch.Tensor):
         alpha_logits = self.model(g1, g2)
         alphas = self.get_alpha_weights(alpha_logits)
-        soft_assignments = torch.einsum('bk,kij->bij', alphas, self.perm_matrices)
-        entropy = -(alphas * (alphas + 1e-8).log()).sum(dim=-1).mean()
-        return soft_assignments, alphas, entropy
+
+        # ----------------------------
+        # Build soft permutation
+        # S[b,i,j] = k ∑ ​α[b,k] ⋅ 1[j=permk​[i]]
+        # ----------------------------
+        
+        B = g1.shape[0]
+
+        soft = torch.zeros(
+            B, self.n, self.n, 
+            device=alphas.device,
+            dtype=alphas.dtype,
+        )
+
+        # perm = self.perm_vectors.T   # (n,k)
+
+        rows = torch.arange(self.n, device=alphas.device)
+
+        # soft = torch.zeros(
+        #     B, self.n, self.n,
+        #     device=alphas.device,
+        #     dtype=alphas.dtype,
+        # )
+
+        # cols = perm.unsqueeze(0).expand(B, -1, -1)       # (B,n,k)
+        # weights = alphas.unsqueeze(1).expand(-1, self.n, -1)  # (B,n,k)
+
+        # soft.scatter_add_(2, cols, weights)
+
+        for k_idx in range(self.k):
+            cols = self.perm_vectors[k_idx]
+            soft[:, rows, cols] += alphas[:, k_idx].unsqueeze(-1)
+
+        # debug
+        # matrices = torch.zeros((self.k, 10, 10), device=alphas.device, dtype=torch.float32)
+        # matrices.scatter_(2, self.perm_vectors.unsqueeze(-1), 1.0)
+        # ref = torch.einsum('bk,kij->bij', alphas, matrices)
+        # print(torch.allclose(ref, soft, atol=1e-6))
+
+        return soft, alphas
+        # soft_assignments = torch.einsum('bk,kij->bij', alphas, self.perm_matrices)
+        # entropy = -(alphas * (alphas + 1e-8).log()).sum(dim=-1).mean()
+        # return soft_assignments, alphas, entropy

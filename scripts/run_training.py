@@ -310,6 +310,10 @@ def main(args):
 
     device = torch.device(config.device)
 
+    # --------------------------------------------------
+    # Initialization
+    # --------------------------------------------------
+
     # 1. Load datasets
     train_dataset, test_dataset, dataset = load_datasets(config.dataset)
 
@@ -317,34 +321,81 @@ def main(args):
     train_indices, val_indices = split_train_val(train_dataset)
 
     # 3. Instantiate DataLoaders class
-    loaders = DataLoaders(dataset, train_indices, val_indices, test_dataset.i, train_dataset.norm_ged)
+    loaders = DataLoaders(
+        dataset, 
+        train_indices, 
+        val_indices, 
+        test_dataset.i, 
+        train_dataset.norm_ged
+    )
 
     # 5. Initialize models
     max_graph_size = max([g.num_nodes for g in dataset])
+
     components = ModelFactory.initialize(
         num_features=train_dataset.num_features,
         max_graph_size=max_graph_size,
         config=config
     )
 
-    # triplet_trainer = TripletTrainer(
-    #     components.modules.encoder,
-    #     components.optimizers.encoder,
-    #     components.optimizers.encoder_scheduler,
-    #     config=config
-    # )
+    encoder = components.modules.encoder
+    optimizer = components.optimizers.encoder
+    scheduler = components.optimizers.encoder_scheduler
 
-    # encoder = triplet_trainer.train(loaders.triplet_loader)
-    # encoder.freeze_params(encoder)
+    # --------------------------------------------------
+    # Encoder setup: train or load
+    # --------------------------------------------------
 
-    ckpt = torch.load(f'{config.output_dir}/checkpoint_encoder_debug.pth', map_location=device)
+    if config.encoder.mode == "train":
 
-    components.modules.encoder.load_state_dict(ckpt["encoder"])
-    components.optimizers.encoder.load_state_dict(ckpt["optimizer"])
-    components.modules.encoder.eval()
+        triplet_trainer = TripletTrainer(
+            encoder,
+            optimizer,
+            scheduler,
+            config=config
+        )
+
+        encoder = triplet_trainer.train(loaders.triplet_loader)
+        encoder.freeze_params(encoder)
+    
+    elif config.encoder.mode == "load":
+        
+        ckpt_path = f"{config.output_dir}/{config.encoder.checkpoint}"
+        ckpt = torch.load(ckpt_path, map_location=device)
+
+        encoder.load_state_dict(ckpt["encoder"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+
+        encoder.eval()
+        encoder.freeze_params(encoder)
+    
+    else:
+        raise ValueError("encoder.mode must be 'train' or 'load'.")
+
+    # --------------------------------------------------
+    # Offline Hungarian initialization
+    # --------------------------------------------------
+
+    if config.model.perm_strategy == "offline_hungarian":
+
+        components.perm_pool.initialize(
+            config.model.perm_strategy,
+            encoder,
+            loaders.train_loader
+        )
+
+        perm_matrices = components.perm_pool.get_matrix_batch()
+
+        components.modules.alpha_layer.set_permutations(
+            perm_matrices.to(device)
+        )
+
+    # --------------------------------------------------
+    # Siamese training
+    # --------------------------------------------------
 
     siamese_trainer = SiameseTrainer(
-        components.modules.encoder,
+        encoder,
         components.modules.alpha_layer,
         components.alpha_tracker,
         components.perm_pool,
