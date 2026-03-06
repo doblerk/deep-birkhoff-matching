@@ -384,11 +384,9 @@ def main(args):
             loaders.train_loader
         )
 
-        perm_matrices = components.perm_pool.get_matrix_batch()
+        perm_vectors = components.perm_pool.get_vectors()
 
-        components.modules.alpha_layer.set_permutations(
-            perm_matrices.to(device)
-        )
+        components.modules.alpha_layer.set_permutations(perm_vectors)
 
     # --------------------------------------------------
     # Siamese training

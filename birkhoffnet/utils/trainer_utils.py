@@ -1,3 +1,4 @@
+import pickle
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -106,34 +107,45 @@ class SiameseTrainer:
     # --------------------------------------------------------
 
     def train(self, train_loader, val_loader, test_loader):
-        # val_losses = []
+        val_losses = []
+        entropy_count = torch.zeros(self.config.training.epochs_siamese, requires_grad=False, device='cpu')
+        neff_count = torch.zeros(self.config.training.epochs_siamese, requires_grad=False, device='cpu')
+
         for epoch in range(self.config.training.epochs_siamese):
 
-            self._train_one_epoch(train_loader, epoch)
+            self._train_one_epoch(train_loader, epoch, entropy_count, neff_count)
 
             if epoch % 1 == 0:
                 val_loss = self.evaluate(val_loader)
-                print(
-                    f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
-                    f"- Val MSE: {val_loss:.4f} "
-                    f"- RMSE: {np.sqrt(val_loss):.4f} "
-                    f"- Scale: {self.criterion.scale.item():.4f}"
-                )
-                # val_losses.append(val_loss)
+                # print(
+                #     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
+                #     f"- Val MSE: {val_loss:.4f} "
+                #     f"- RMSE: {np.sqrt(val_loss):.4f} "
+                #     f"- Scale: {self.criterion.scale.item():.4f}"
+                # )
+                val_losses.append(val_loss)
 
         test_loss = self.evaluate(test_loader)
-        print(
-            f"[GED] Final Test MSE: {test_loss:.4f} "
-            f"- RMSE: {np.sqrt(test_loss):.4f}"
-        )
-        # np.save(f"{self.config.output_dir}/model6_run5.npy", np.array(val_losses))
-        # print("done!")
+        # print(
+        #     f"[GED] Final Test MSE: {test_loss:.4f} "
+        #     f"- RMSE: {np.sqrt(test_loss):.4f}"
+        # )
+        # np.save(f"{self.config.output_dir}/modela_run1.npy", np.array(val_losses))
+        res = {
+            "val_loss": np.array(val_losses),
+            "test_loss": test_loss,
+            "entropy": np.array(entropy_count),
+            "neff": np.array(neff_count)
+        }
+        with open(f"{self.config.output_dir}/modela_run1.pkl", "wb") as f:
+            pickle.dump(res, f)
+        print("done!")
 
     # --------------------------------------------------------
     # Internal Training Step
     # --------------------------------------------------------
 
-    def _train_one_epoch(self, loader, epoch):
+    def _train_one_epoch(self, loader, epoch, entropy_count, neff_count):
 
         self.alpha_layer.train()
         self.criterion.train()
@@ -167,6 +179,13 @@ class SiameseTrainer:
                 graph_repr_b1, graph_repr_b2
             )
 
+            # --- just for analysis ---
+            ent = self.alpha_layer.get_entropy(alphas) / len(loader)
+            neff = 1.0 / (alphas ** 2).sum(dim=-1).mean()
+            entropy_count[epoch] = ent.detach().cpu()
+            neff_count[epoch] = neff.detach().cpu()
+            # -------------------------
+
             # Track alpha usage
             if self.config.perm_evo.evolve:
                 self.alpha_tracker.collect(alphas)
@@ -191,12 +210,12 @@ class SiameseTrainer:
 
             loss.backward()
             self.optimizer.step()
-        
+
         # ----------------------------------
         # Genetic permutation evolution
         # ----------------------------------
 
-        evolved = False
+        # evolved = False
 
         if self.config.perm_evo.evolve:
 
@@ -216,14 +235,13 @@ class SiameseTrainer:
 
                 # print("Vectors match:", torch.equal(self.perm_pool.get_vectors(), self.alpha_layer.perm_vectors))
           
-                if self.config.perm_evo.freeze_after_evolve:
-                    self.alpha_layer.freeze_module()
+                # if self.config.perm_evo.freeze_after_evolve:
+                #     self.alpha_layer.freeze_module()
                 
-                evolved = True
-                print("Permutations are changed.")
+                # evolved = True
         
-        if not evolved:
-            self.alpha_layer.update_freeze_timer()
+        # if not evolved:
+        #     self.alpha_layer.update_freeze_timer() 
 
     # --------------------------------------------------------
     # Evaluation
@@ -261,7 +279,7 @@ class SiameseTrainer:
                 node_repr_b2, graph_repr_b2, batch2.batch
             )
 
-            soft_assignments, alphas = self.alpha_layer(
+            soft_assignments, _ = self.alpha_layer(
                 graph_repr_b1, graph_repr_b2
             )
 

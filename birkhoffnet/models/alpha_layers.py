@@ -173,11 +173,10 @@ class AlphaPermutationLayer(nn.Module):
             self.unfreeze_module()
 
     def set_permutations(self, new_perm_vectors: torch.Tensor):
-        # self.perm_vectors = new_perm_vectors.to(self.perm_vectors.device)
         self.perm_vectors.copy_(new_perm_vectors.to(self.perm_vectors.device))
     
     def get_entropy(self, alphas: torch.Tensor) -> torch.Tensor:
-        entropy = -(alphas * (alphas + 1e-8).log()).sum(dim=-1).mean()
+        entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=-1).mean()
         return entropy
     
     def mse_loss(self, input, target, use_entropy=False, alphas=None, epoch=None, entropy_weight=None):
