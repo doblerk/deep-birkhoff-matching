@@ -52,12 +52,16 @@ class Config:
     perm_evo: PermutationEvolution
     training: TrainingParams
     alpha_tracker: AlphaTrackerConfig
+    dataset_dir: str
     output_dir: str
 
-
-def load_config(path: str) -> Config:
+def load_json(path: str):
     with open(path) as f:
         data = json.load(f)
+    return data
+
+def load_config(path: str) -> Config:
+    data = load_json(path)
 
     return Config(
         dataset=data["dataset"],
@@ -67,5 +71,10 @@ def load_config(path: str) -> Config:
         perm_evo=PermutationEvolution(**data["permutation_evolution"]),
         training=TrainingParams(**data["training"]),
         alpha_tracker=AlphaTrackerConfig(**data["alpha_tracker"]),
+        dataset_dir=data["dataset_dir"],
         output_dir=data["output_dir"],
     )
+
+
+def load_metadata(path: str):
+    return load_json(path)

@@ -67,7 +67,10 @@ class SiameseDataset(Dataset):
                 norm_ged = torch.tensor(1.0) # 1.0 for GED range (0, 1], 0.0 otherwise
             
             else:
-                idx2 = int(random.choice(self.train_indices))
+                # idx2 = int(random.choice(self.train_indices))
+                idx2 = idx1
+                while idx2 == idx1:
+                    idx2 = int(random.choice(self.train_indices))
                 g1, g2 = self.graphs[idx1], self.graphs[idx2]
                 norm_ged = self.norm_ged_matrix[idx1, idx2]
         

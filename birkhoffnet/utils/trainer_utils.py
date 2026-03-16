@@ -32,6 +32,9 @@ class TripletTrainer:
             total_loss = 0
             total_samples = 0
 
+            epoch_ap = []
+            epoch_an = []
+
             for anchor_graphs, pos_graphs, neg_graphs in loader:
 
                 a_batch = anchor_graphs.to(self.config.device)
@@ -43,13 +46,25 @@ class TripletTrainer:
                 _, a_emb = self.encoder(a_batch.x, a_batch.edge_index, a_batch.batch)
                 _, p_emb = self.encoder(p_batch.x, p_batch.edge_index, p_batch.batch)
                 _, n_emb = self.encoder(n_batch.x, n_batch.edge_index, n_batch.batch)
+                
+                a_emb = F.normalize(a_emb, p=2, dim=1)
+                p_emb = F.normalize(p_emb, p=2, dim=1)
+                n_emb = F.normalize(n_emb, p=2, dim=1)
+
+                # ------ diagnostics monitoring ------
+                d_ap = torch.norm(a_emb - p_emb, dim=1)
+                d_an = torch.norm(a_emb - n_emb, dim=1)
+                epoch_ap.append(d_ap.mean().item())
+                epoch_an.append(d_an.mean().item())
+                epoch_gap = (d_an - d_ap).mean().item()
+                # ------------------------------------
 
                 loss = self.criterion(a_emb, p_emb, n_emb)
 
                 loss.backward()
                 self.optimizer.step()
 
-                batch_size = anchor_graphs.i.size(0)
+                batch_size = anchor_graphs.batch_size
                 total_loss += loss.item() * batch_size
                 total_samples += batch_size
 
@@ -58,7 +73,14 @@ class TripletTrainer:
             self.scheduler.step()
 
             if epoch % 10 == 0:
-                print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet} - Loss: {avg_loss:.4f}")
+                # print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet} - Loss: {avg_loss:.4f}")
+                
+                mean_ap = sum(epoch_ap) / len(epoch_ap)
+                mean_an = sum(epoch_an) / len(epoch_an)
+                print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
+                      f"- Loss: {avg_loss:.4f} "
+                      f"- d_ap={mean_ap:.4f}, d_an={mean_an:.4f}, gap={epoch_gap:.4f}"
+                )
 
         self._save_checkpoint()
         return self.encoder
@@ -117,29 +139,29 @@ class SiameseTrainer:
 
             if epoch % 1 == 0:
                 val_loss = self.evaluate(val_loader)
-                # print(
-                #     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
-                #     f"- Val MSE: {val_loss:.4f} "
-                #     f"- RMSE: {np.sqrt(val_loss):.4f} "
-                #     f"- Scale: {self.criterion.scale.item():.4f}"
-                # )
-                val_losses.append(val_loss)
+                print(
+                    f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
+                    f"- Val MSE: {val_loss:.4f} "
+                    f"- RMSE: {np.sqrt(val_loss):.4f} "
+                    f"- Scale: {self.criterion.scale.item():.4f}"
+                )
+                # val_losses.append(val_loss)
 
         test_loss = self.evaluate(test_loader)
-        # print(
-        #     f"[GED] Final Test MSE: {test_loss:.4f} "
-        #     f"- RMSE: {np.sqrt(test_loss):.4f}"
-        # )
+        print(
+            f"[GED] Final Test MSE: {test_loss:.4f} "
+            f"- RMSE: {np.sqrt(test_loss):.4f}"
+        )
         # np.save(f"{self.config.output_dir}/modela_run1.npy", np.array(val_losses))
-        res = {
-            "val_loss": np.array(val_losses),
-            "test_loss": test_loss,
-            "entropy": np.array(entropy_count),
-            "neff": np.array(neff_count)
-        }
-        with open(f"{self.config.output_dir}/modela_run1.pkl", "wb") as f:
-            pickle.dump(res, f)
-        print("done!")
+        # res = {
+        #     "val_loss": np.array(val_losses),
+        #     "test_loss": test_loss,
+        #     "entropy": np.array(entropy_count),
+        #     "neff": np.array(neff_count)
+        # }
+        # with open(f"{self.config.output_dir}/modela_run1.pkl", "wb") as f:
+        #     pickle.dump(res, f)
+        # print("done!")
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -180,10 +202,10 @@ class SiameseTrainer:
             )
 
             # --- just for analysis ---
-            ent = self.alpha_layer.get_entropy(alphas) / len(loader)
-            neff = 1.0 / (alphas ** 2).sum(dim=-1).mean()
-            entropy_count[epoch] = ent.detach().cpu()
-            neff_count[epoch] = neff.detach().cpu()
+            # ent = self.alpha_layer.get_entropy(alphas) / len(loader)
+            # neff = 1.0 / (alphas ** 2).sum(dim=-1).mean()
+            # entropy_count[epoch] = ent.detach().cpu()
+            # neff_count[epoch] = neff.detach().cpu()
             # -------------------------
 
             # Track alpha usage

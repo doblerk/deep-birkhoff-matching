@@ -1,3 +1,4 @@
+import json
 import argparse
 
 import torch
@@ -6,7 +7,7 @@ import torch.nn.functional as F
 
 from torch.utils.data import random_split, ConcatDataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.datasets import GEDDataset
+from torch_geometric.datasets import GEDDataset, TUDataset
 from torch_geometric.transforms import Constant
 
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
@@ -23,7 +24,7 @@ from birkhoffnet.utils.diagnostics import accumulate_epoch_stats, \
                                        batched_diagnostics, \
                                        plot_history
 from birkhoffnet.utils.data_utils import load_datasets, split_train_val
-from birkhoffnet.utils.config import load_config
+from birkhoffnet.utils.config import load_config, load_metadata
 from birkhoffnet.utils.dataloader_utils import DataLoaders
 from birkhoffnet.utils.model_utils import ModelFactory
 from birkhoffnet.utils.trainer_utils import TripletTrainer, SiameseTrainer
@@ -222,6 +223,7 @@ def eval_ged(loader, encoder, alpha_layer, cost_builder, criterion, device):
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str, help='Path to parameters file')
+    parser.add_argument('--metadata', type=str, help='Path to metadata file')
     # parser.add_argument('--dataset', type=str, help='Dataset name')
     # parser.add_argument('--output_dir', type=str, help='Path to output directory')
     # parser.add_argument('--k', type=int, default=21, help='Number of generated permutation matrices')
@@ -306,7 +308,9 @@ def get_args_parser():
 #     train_siamese_network(siamese_train_loader, siamese_val_loader, siamese_test_loader, encoder, alpha_layer, alpha_tracker, perm_pool, cost_builder, criterion, device, args)
 
 def main(args):
+    
     config = load_config(args.params)
+    metadata = load_metadata(args.metadata)
 
     device = torch.device(config.device)
 
@@ -315,26 +319,100 @@ def main(args):
     # --------------------------------------------------
 
     # 1. Load datasets
-    train_dataset, test_dataset, dataset = load_datasets(config.dataset)
+    # train_dataset, test_dataset, dataset = load_datasets(config.dataset)
 
-    # 2. Train/val split
-    train_indices, val_indices = split_train_val(train_dataset)
+    # --------------------------------------------------
+    # 1. Load base dataset
+    # --------------------------------------------------
+    
+    dataset = TUDataset(
+        root=config.dataset_dir, 
+        name=config.dataset,
+        use_node_attr=False
+    )
 
-    # 3. Instantiate DataLoaders class
+    # --------------------------------------------------
+    # 2. Load metadata
+    # --------------------------------------------------
+    
+    valid_indices = metadata["valid_graph_indices"]
+
+    # valid_indices from metadata
+    valid_idx_map = {orig_idx: i for i, orig_idx in enumerate(valid_indices)}
+
+    # train/val/test in original indices
+    train_indices_orig = set(metadata["splits"]["train"])
+    val_indices_orig = set(metadata["splits"]["val"])
+    test_indices_orig = set(metadata["splits"]["test"])
+
+    # map to 0..n_filtered-1
+    train_indices = [valid_idx_map[i] for i in train_indices_orig]
+    val_indices = [valid_idx_map[i] for i in val_indices_orig]
+    test_indices = [valid_idx_map[i] for i in test_indices_orig]
+
+    # --------------------------------------------------
+    # 3. Load ground-truths GED values
+    # --------------------------------------------------
+
+    ged_data = np.load("./res/quick_debugging/ged_results_AIDS_full.npy", allow_pickle=True)
+
+    n = metadata["num_graphs_filtered"]
+
+    node_counts = torch.tensor(
+        [dataset[i].num_nodes for i in valid_indices],
+        dtype=torch.float32
+    )
+
+    max_nodes = int(torch.max(node_counts).item())
+
+    # --------------------------------------------------
+    # 4. Compute GED matrix
+    # --------------------------------------------------
+
+    ged_matrix = torch.zeros(
+        (n, n),
+        dtype=torch.float32
+    )
+
+    for a, b, ged, _, _ in ged_data:
+        i, j = valid_idx_map[a], valid_idx_map[b]
+        ged_matrix[i, j] = ged
+        ged_matrix[j, i] = ged
+    
+    # --------------------------------------------------
+    # 5. Compute normalization factor matrix
+    # --------------------------------------------------
+    
+    norm_factor_matrix = 0.5 * (
+        node_counts[:, None] + node_counts[None, :]
+    )
+
+    # --------------------------------------------------
+    # 6. Compute normalized GED similarity
+    # --------------------------------------------------
+
+    norm_ged_matrix = torch.exp(-ged_matrix / norm_factor_matrix)
+
+    norm_ged_matrix.fill_diagonal_(1.0)
+
+    # train_indices, val_indices = split_train_val(train_dataset)
+
+    # --------------------------------------------------
+    # 4. Instantiate DataLoaders
+    # --------------------------------------------------
+
     loaders = DataLoaders(
         dataset, 
-        train_indices, 
-        val_indices, 
-        test_dataset.i, 
-        train_dataset.norm_ged
+        train_indices,
+        val_indices,
+        test_indices,
+        norm_ged_matrix
     )
 
     # 5. Initialize models
-    max_graph_size = max([g.num_nodes for g in dataset])
-
     components = ModelFactory.initialize(
-        num_features=train_dataset.num_features,
-        max_graph_size=max_graph_size,
+        num_features=dataset.num_features,
+        max_graph_size=max_nodes,
         config=config
     )
 
