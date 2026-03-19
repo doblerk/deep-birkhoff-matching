@@ -14,14 +14,14 @@ class DataLoaders:
     def _create_triplet_loader(self, dataset, train_indices, ged_matrix):
         # triplet_train = TripletDataset(dataset, train_indices, ged_matrix_to_dict(ged_matrix), k=int(len(train_indices) * 0.4))
         triplet_train = TripletDataset(dataset, train_indices, ged_matrix, k=100)
-        return DataLoader(triplet_train, batch_size=128, shuffle=True)
+        return DataLoader(triplet_train, batch_size=128, shuffle=True, num_workers=4)
 
     def _create_siamese_loaders(self, dataset, train_indices, val_indices, test_indices, ged_matrix):
         siamese_train = SiameseDataset(dataset, ged_matrix, pair_mode='train', train_indices=train_indices)
         siamese_val = SiameseDataset(dataset, ged_matrix, pair_mode='val', train_indices=train_indices, val_indices=val_indices)
         siamese_test = SiameseDataset(dataset, ged_matrix, pair_mode='test', train_indices=train_indices, test_indices=test_indices)
         return (
-            DataLoader(siamese_train, batch_size=128, shuffle=True, num_workers=0),
-            DataLoader(siamese_val, batch_size=128, shuffle=False, num_workers=0),
-            DataLoader(siamese_test, batch_size=len(test_indices), shuffle=False, num_workers=10)
+            DataLoader(siamese_train, batch_size=128, shuffle=True, num_workers=4),
+            DataLoader(siamese_val, batch_size=128, shuffle=False, num_workers=4),
+            DataLoader(siamese_test, batch_size=len(test_indices), shuffle=False, num_workers=4)
         )

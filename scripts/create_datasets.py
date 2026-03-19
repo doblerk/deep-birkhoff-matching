@@ -12,6 +12,7 @@ def get_args_parser():
     parser.add_argument('--dataset_dir', type=str, help='Path to dataset')
     parser.add_argument('--dataset_name', type=str, help='Dataset name')
     parser.add_argument('--output_dir', type=str, help='Path to output directory')
+    parser.add_argument('--use_subset', action='store_true', help="Filter graphs using mean ± std node count")
     return parser
 
 
@@ -24,16 +25,22 @@ def main(args):
     node_counts = np.array([g.num_nodes for g in dataset])
     edge_counts = np.array([g.num_edges for g in dataset])
 
-    mu = node_counts.mean()
-    sigma = node_counts.std()
+    if args.use_subset:
+        mu = node_counts.mean()
+        sigma = node_counts.std()
 
-    lower = mu - sigma
-    upper = mu + sigma
+        lower = mu - sigma
+        upper = mu + sigma
 
-    valid_indices = [
-        i for i, g in enumerate(dataset)
-        if lower <= g.num_nodes <= upper
-    ]
+        valid_indices = [
+            i for i, g in enumerate(dataset)
+            if lower <= g.num_nodes <= upper
+        ]
+    else:
+        valid_indices = list(range(len(dataset)))
+        mu = node_counts.mean()
+        sigma = node_counts.std()
+        lower, upper = None, None
 
     pairs = np.array(list(combinations(valid_indices, r=2)), dtype=np.int32)
     np.save(output_dir / f"{args.dataset_name}_pairs.npy", pairs)
@@ -78,9 +85,9 @@ def main(args):
         "valid_graph_indices": valid_indices,
 
         "splits": {
-            "train": train_idx,
-            "val": val_idx,
-            "test": test_idx
+            "train": train_idx.tolist(),
+            "val": val_idx.tolist(),
+            "test": test_idx.tolist()
         }
     }
 

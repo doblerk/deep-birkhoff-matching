@@ -1,4 +1,3 @@
-import pickle
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -30,10 +29,8 @@ class TripletTrainer:
         for epoch in range(self.config.training.epochs_triplet):
 
             total_loss = 0
+            total_gap = 0
             total_samples = 0
-
-            epoch_ap = []
-            epoch_an = []
 
             for anchor_graphs, pos_graphs, neg_graphs in loader:
 
@@ -54,9 +51,7 @@ class TripletTrainer:
                 # ------ diagnostics monitoring ------
                 d_ap = torch.norm(a_emb - p_emb, dim=1)
                 d_an = torch.norm(a_emb - n_emb, dim=1)
-                epoch_ap.append(d_ap.mean().item())
-                epoch_an.append(d_an.mean().item())
-                epoch_gap = (d_an - d_ap).mean().item()
+                total_gap += (d_an - d_ap).sum().item()
                 # ------------------------------------
 
                 loss = self.criterion(a_emb, p_emb, n_emb)
@@ -68,18 +63,15 @@ class TripletTrainer:
                 total_loss += loss.item() * batch_size
                 total_samples += batch_size
 
-            avg_loss = total_loss / total_samples
-
             self.scheduler.step()
 
             if epoch % 10 == 0:
-                # print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet} - Loss: {avg_loss:.4f}")
+                avg_loss = total_loss / total_samples
+                avg_epoch_gap = total_gap / total_samples
                 
-                mean_ap = sum(epoch_ap) / len(epoch_ap)
-                mean_an = sum(epoch_an) / len(epoch_an)
                 print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
                       f"- Loss: {avg_loss:.4f} "
-                      f"- d_ap={mean_ap:.4f}, d_an={mean_an:.4f}, gap={epoch_gap:.4f}"
+                      f"- gap: {avg_epoch_gap:.4f}"
                 )
 
         self._save_checkpoint()
@@ -129,7 +121,7 @@ class SiameseTrainer:
     # --------------------------------------------------------
 
     def train(self, train_loader, val_loader, test_loader):
-        val_losses = []
+        # val_losses = []
         entropy_count = torch.zeros(self.config.training.epochs_siamese, requires_grad=False, device='cpu')
         neff_count = torch.zeros(self.config.training.epochs_siamese, requires_grad=False, device='cpu')
 
@@ -137,7 +129,7 @@ class SiameseTrainer:
 
             self._train_one_epoch(train_loader, epoch, entropy_count, neff_count)
 
-            if epoch % 1 == 0:
+            if epoch % 10 == 0:
                 val_loss = self.evaluate(val_loader)
                 print(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
@@ -162,6 +154,7 @@ class SiameseTrainer:
         # with open(f"{self.config.output_dir}/modela_run1.pkl", "wb") as f:
         #     pickle.dump(res, f)
         # print("done!")
+        self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -322,3 +315,10 @@ class SiameseTrainer:
             total_samples += ged_labels.size(0)
 
         return total_loss / total_samples
+
+    def _save_checkpoint(self):
+        torch.save({
+            'alpha_layer': self.alpha_layer.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'criterion': self.criterion.state_dict(),
+        }, f'{self.config.output_dir}/ckpt_ged.pth')

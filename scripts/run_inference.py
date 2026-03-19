@@ -5,30 +5,20 @@ import numpy as np
 import torch.nn.functional as F
 
 from time import time
+from pathlib import Path
 
-from torch.utils.data import random_split, ConcatDataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.datasets import GEDDataset
+from torch_geometric.datasets import TUDataset
 from torch_geometric.transforms import Constant
 
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
-from birkhoffnet.datasets.triplet_dataset import TripletDataset
-from birkhoffnet.models.gnn_models import Model
-from birkhoffnet.losses.triplet_loss import TripletLoss
 from birkhoffnet.losses.ged_loss import GEDLoss
-from birkhoffnet.utils.permutation import PermutationPool
-from birkhoffnet.models.alpha_layers import AlphaPermutationLayer
-from birkhoffnet.utils.data_utils import ged_matrix_to_dict, \
-                                      compute_cost_matrices, \
-                                      pad_cost_matrices, \
-                                      get_node_masks
+from birkhoffnet.utils.model_utils import ModelFactory
+from birkhoffnet.utils.config import load_config, load_metadata
 
 
 @torch.no_grad()
-def infer_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size, num_graphs):
-    encoder.eval()
-    alpha_layer.eval()
-    criterion.eval()
+def infer_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, num_graphs):
 
     distance_matrix = torch.zeros((num_graphs, num_graphs), dtype=torch.float32, device=device)
     
@@ -42,27 +32,47 @@ def infer_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size, n
         n_nodes_1 = batch1.batch.bincount()
         n_nodes_2 = batch2.batch.bincount()
 
-        node_repr_b1, graph_repr_b1 = encoder(batch1.x, batch1.edge_index, batch1.batch)
-        node_repr_b2, graph_repr_b2 = encoder(batch2.x, batch2.edge_index, batch2.batch)
+        normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
-        cost_matrices = compute_cost_matrices(node_repr_b1, n_nodes_1, node_repr_b2, n_nodes_2)
-        padded_cost_matrices = pad_cost_matrices(cost_matrices, max_graph_size)
+        node_repr_b1, graph_repr_b1 = encoder(
+                batch1.x,
+                batch1.edge_index,
+                batch1.batch
+        )
 
-        soft_assignments, alphas = alpha_layer(graph_repr_b1, graph_repr_b2)
+        node_repr_b2, graph_repr_b2 = encoder(
+            batch2.x,
+            batch2.edge_index,
+            batch2.batch
+        )
 
-        row_masks = get_node_masks(batch1, max_graph_size, n_nodes_1)
-        col_masks = get_node_masks(batch2, max_graph_size, n_nodes_2)
+        cost_matrices, masks1, masks2 = cost_builder(
+            node_repr_b1,
+            graph_repr_b1,
+            batch1.batch,
+            node_repr_b2,
+            graph_repr_b2,
+            batch2.batch
+        )
 
-        assignment_mask = row_masks.unsqueeze(2) * col_masks.unsqueeze(1)
-
-        soft_assignments = soft_assignments * assignment_mask
+        soft_assignments, _ = alpha_layer(
+                graph_repr_b1,
+                graph_repr_b2
+        )
+        
+        assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
+        soft_assignments = soft_assignments * assignment_masks
 
         row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         soft_assignments = soft_assignments / row_sums
-        
-        predicted_ged = criterion(padded_cost_matrices, soft_assignments)
 
-        distance_matrix[idx1, idx2] = predicted_ged
+        predicted_ged = criterion(cost_matrices, soft_assignments)
+
+        normalized_predicted_ged = torch.exp(
+            -predicted_ged / normalization_factor
+        )
+
+        distance_matrix[idx1, idx2] = normalized_predicted_ged
     
     t1 = time()
     runtime = t1 - t0
@@ -75,80 +85,147 @@ def infer_ged(loader, encoder, alpha_layer, criterion, device, max_graph_size, n
 
 def get_args_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, help='Dataset name')
-    parser.add_argument('--output_dir', type=str, help='Path to output directory')
-    parser.add_argument('--k', type=int, default=21, help='Number of generated permutation matrices')
+    parser.add_argument('--params', type=str, help='Path to parameters file')
+    parser.add_argument('--metadata', type=str, help='Path to metadata file')
+    parser.add_argument('--ged_data', type=str, help='Path to ged file')
     return parser
 
 
 def main(args):
 
-    train_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=True)
-    test_dataset = GEDDataset(root=f'data/datasets/{args.dataset}', name=args.dataset, train=False)
+    config = load_config(args.params)
+    metadata = load_metadata(args.metadata)
 
-    if 'x' not in train_dataset[0]:
-        train_dataset.transform = Constant(value=1.0)
-        test_dataset.transform = Constant(value=1.0)
+    device = torch.device(config.device)
 
-    dataset = ConcatDataset([train_dataset, test_dataset])
+    # --------------------------------------------------
+    # 1. Load dataset
+    # --------------------------------------------------
 
-    num_features = train_dataset.num_features
-    norm_ged_matrix = train_dataset.norm_ged
-
-    train_size = int(0.75 * len(train_dataset))
-    val_size = len(train_dataset) - train_size
-    
-    generator = torch.Generator().manual_seed(42)
-    train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size], generator=generator)
-    train_dataset_indices, val_dataset_indices = sorted(train_dataset.indices), sorted(val_dataset.indices)
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    embedding_dim = 64
-    encoder = Model(num_features, embedding_dim, 1)
-    encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=1e-3, weight_decay=1e-5)
-
-    max_graph_size = max([g.num_nodes for g in dataset])
-    k = args.k
-    
-    perm_pool = PermutationPool(max_n=max_graph_size, k=k)
-    perm_matrices = perm_pool.get_matrix_batch().to(device)
-
-    alpha_layer = AlphaPermutationLayer(perm_matrices, k, embedding_dim).to(device)
-
-    criterion = GEDLoss()
-
-    ged_optimizer = torch.optim.Adam(
-        list(alpha_layer.parameters()) + list(criterion.parameters()),
-        lr=1e-3, 
-        weight_decay=1e-5
+    dataset = TUDataset(
+        root=config.dataset_dir, 
+        name=config.dataset,
+        use_node_attr=False
     )
 
-    checkpoint_encoder = torch.load(f'{args.output_dir}/checkpoint_encoder.pth', map_location=device)
-    encoder.load_state_dict(checkpoint_encoder['encoder'])
-    encoder_optimizer.load_state_dict(checkpoint_encoder['optimizer'])
+    # --------------------------------------------------
+    # 2. Metadata filtering
+    # --------------------------------------------------
 
-    encoder = encoder.to(device)
+    valid_indices = metadata["valid_graph_indices"]
 
-    checkpoint_ged = torch.load(f'{args.output_dir}/checkpoint_ged.pth', map_location=device)
-    alpha_layer.load_state_dict(checkpoint_ged['alpha_layer'])
-    ged_optimizer.load_state_dict(checkpoint_ged['optimizer'])
-    criterion.load_state_dict(checkpoint_ged['criterion'])
+    dataset_sub = [dataset[i] for i in valid_indices]
 
-    alpha_layer = alpha_layer.to(device)
-    criterion = criterion.to(device)
+    # valid_indices from metadata
+    valid_idx_map = {orig_idx: i for i, orig_idx in enumerate(valid_indices)}
+
+    # train/val/test in original indices
+    train_indices_orig = set(metadata["splits"]["train"])
+    test_indices_orig = set(metadata["splits"]["test"])
+
+    # map to 0..n_filtered-1
+    train_indices = [valid_idx_map[i] for i in train_indices_orig]
+    test_indices = [valid_idx_map[i] for i in test_indices_orig]
+
+    # --------------------------------------------------
+    # 3. Load GED matrices
+    # --------------------------------------------------
+
+    ged_data = torch.load(args.ged_data)
+
+    norm_ged_matrix = ged_data["norm_ged_matrix"]
+    node_counts = ged_data["node_counts"]
+
+    max_nodes = int(torch.max(node_counts).item())
+
+    # --------------------------------------------------
+    # 4. Build filtered dataset
+    # --------------------------------------------------
+
+    filtered_dataset = [dataset[i] for i in valid_indices]
+
+    if filtered_dataset[0].x is None:
+        for g in filtered_dataset:
+            g.x = torch.ones((g.num_nodes, 1))
+
+    # --------------------------------------------------
+    # 5. Initialize models
+    # --------------------------------------------------
+
+    components = ModelFactory.initialize(
+        num_features=dataset.num_features,
+        max_graph_size=max_nodes,
+        config=config
+    )
+
+    encoder = components.modules.encoder
+    encoder_optimizer = components.optimizers.encoder
+    alpha_layer = components.modules.alpha_layer
+    cost_builder = components.modules.cost_builder
+
+    criterion = GEDLoss().to(config.device)
+
+    ged_optimizer = torch.optim.AdamW(
+        list(alpha_layer.parameters())
+        + list(cost_builder.parameters())
+        + list(criterion.parameters()),
+        lr=config.training.lr,
+        weight_decay=config.training.weight_decay
+    )
+
+    # --------------------------------------------------
+    # 6. Load checkpoints
+    # --------------------------------------------------
+
+    ckpt_encoder_path = f"{config.output_dir}/ckpt_encoder.pth"
+    ckpt_encoder = torch.load(ckpt_encoder_path, map_location=device)
+
+    encoder.load_state_dict(ckpt_encoder["encoder"])
+    encoder_optimizer.load_state_dict(ckpt_encoder["optimizer"])
+
+    ckpt_ged_path = f"{config.output_dir}/ckpt_ged.pth"
+    ckpt_ged = torch.load(ckpt_ged_path, map_location=device)
+
+    alpha_layer.load_state_dict(ckpt_ged["alpha_layer"])
+    ged_optimizer.load_state_dict(ckpt_ged["optimizer"])
+    criterion.load_state_dict(ckpt_ged["criterion"])
 
     encoder.eval()
     alpha_layer.eval()
+    cost_builder.eval()
     criterion.eval()
 
-    siamese_all = SiameseDataset(dataset, norm_ged_matrix, pair_mode='all', train_indices=train_dataset_indices, test_indices=test_dataset.i)
-    siamese_all_loader = DataLoader(siamese_all, batch_size=64 * 384, shuffle=False, num_workers=10)
+    # --------------------------------------------------
+    # 7. Initialize data loader
+    # --------------------------------------------------
 
-    pred_geds = infer_ged(siamese_all_loader, encoder, alpha_layer, criterion, device, max_graph_size, len(dataset))
+    siamese_all = SiameseDataset(
+        dataset_sub, 
+        norm_ged_matrix, 
+        pair_mode='all', 
+        train_indices=train_indices, 
+        test_indices=test_indices
+    )
 
-    with open(f'{args.output_dir}/pred_geds.npy', 'wb') as file:
-        np.save(file, pred_geds)
+    siamese_all_loader = DataLoader(siamese_all, batch_size=1024, shuffle=False, num_workers=10)
+
+    # --------------------------------------------------
+    # 8. Infer all graph pairs
+    # --------------------------------------------------
+
+    distances = infer_ged(
+        siamese_all_loader, 
+        encoder, 
+        alpha_layer,
+        cost_builder,
+        criterion,
+        device,
+        len(valid_indices)
+    )
+
+    output_file = Path(config.output_dir) / "distances.npy"
+    with open(output_file, 'wb') as file:
+        np.save(file, distances)
 
 
 if __name__ == '__main__':
