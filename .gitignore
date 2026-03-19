@@ -1,15 +1,10 @@
-**/__pycache__/
+# python
+__pycache__/
+
+# datasets
+data/
+
+# experiments
 /res/
 *-info/
 params.json
-
-# Ignore everything inside data
-/data/*
-
-# Allow dataset folders to be visible to git
-!/data/*/
-
-# Keep metadata files
-!/data/*/metadata.json
-!/data/*/*pairs.npy
-!/data/*/*ged_matrices.pt
