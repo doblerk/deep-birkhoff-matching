@@ -1,10 +1,10 @@
 # python
 __pycache__/
+*-info/
 
 # datasets
-data/
+data/datasets
 
 # experiments
-/res/
-*-info/
+res/
 params.json

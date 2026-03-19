@@ -46,10 +46,18 @@ To avoid redistributing datasets, this repository does not include the raw graph
 Directory structure:
 ```bash
 data/
-└── AIDS/
-    ├── metadata.json
-    ├── AIDS_pairs.npy
-    └── AIDS_ged_matrices.pt
+├── datasets/        # ignored completely
+│   ├── AIDS/
+│   │   ├── raw/
+│   │   └── processed/
+│   └── ...
+│
+└── metadata/        # tracked by git
+    ├── AIDS/
+    │   ├── metadata.json
+    │   ├── AIDS_pairs.npy
+    │   └── AIDS_ged_matrices.pt
+    └── ...
 ```
 
 These files contain:
