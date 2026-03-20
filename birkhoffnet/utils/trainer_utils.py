@@ -151,7 +151,7 @@ class SiameseTrainer:
 
             self._train_one_epoch(train_loader, epoch)
 
-            if epoch % 1 == 0:
+            if epoch % 10 == 0:
                 val_loss = self.evaluate(val_loader)
                 print(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
@@ -160,13 +160,13 @@ class SiameseTrainer:
                     f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
-        # test_loss = self.evaluate(test_loader)
-        # print(
-        #     f"[GED] Final Test MSE: {test_loss:.6f} "
-        #     f"- RMSE: {np.sqrt(test_loss):.6f}"
-        # )
+        test_loss = self.evaluate(test_loader)
+        print(
+            f"[GED] Final Test MSE: {test_loss:.6f} "
+            f"- RMSE: {np.sqrt(test_loss):.6f}"
+        )
 
-        # self._save_checkpoint()
+        self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step

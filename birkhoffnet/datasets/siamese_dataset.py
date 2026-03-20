@@ -29,8 +29,7 @@ class SiameseDataset(Dataset):
         
         elif pair_mode == 'val':
             assert val_indices is not None
-            self.val_indices = val_indices
-            self.pairs = None
+            self.pairs = list(combinations(val_indices, r=2))
         
         elif pair_mode == 'test':
             assert train_indices is not None and test_indices is not None
@@ -49,9 +48,6 @@ class SiameseDataset(Dataset):
     def __len__(self):
         if self.pair_mode == 'train':
             return len(self.train_indices)
-        
-        elif self.pair_mode == 'val':
-            return len(self.val_indices)
         
         else:
             return len(self.pairs)
@@ -75,8 +71,8 @@ class SiameseDataset(Dataset):
                 norm_ged = self.norm_ged_matrix[idx1, idx2]
         
         elif self.pair_mode == 'val':
-            idx1 = self.val_indices[idx]
-            idx2 = int(random.choice(self.val_indices))
+            idx1, idx2 = self.pairs[idx]
+            # idx2 = int(random.choice(self.val_indices))
             g1, g2 = self.graphs[idx1], self.graphs[idx2]
             norm_ged = self.norm_ged_matrix[idx1, idx2]
         

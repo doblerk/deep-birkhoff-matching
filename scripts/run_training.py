@@ -28,7 +28,7 @@ def main(args):
     # 1. Load base dataset
     # --------------------------------------------------
     
-    dataset = TUDataset(
+    dataset_full = TUDataset(
         root=config.dataset_dir, 
         name=config.dataset,
         use_node_attr=False
@@ -39,6 +39,8 @@ def main(args):
     # --------------------------------------------------
     
     valid_indices = metadata["valid_graph_indices"]
+
+    dataset = [dataset_full[i] for i in valid_indices]
 
     # valid_indices from metadata
     valid_idx_map = {orig_idx: i for i, orig_idx in enumerate(valid_indices)}
@@ -76,7 +78,7 @@ def main(args):
 
     # 5. Initialize models
     components = ModelFactory.initialize(
-        num_features=dataset.num_features,
+        num_features=dataset_full.num_features,
         max_graph_size=max_nodes,
         config=config
     )

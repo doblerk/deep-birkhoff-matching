@@ -1,4 +1,3 @@
-import torch
 from torch_geometric.loader import DataLoader
 from birkhoffnet.utils.data_utils import ged_matrix_to_dict
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
@@ -18,10 +17,10 @@ class DataLoaders:
 
     def _create_siamese_loaders(self, dataset, train_indices, val_indices, test_indices, ged_matrix):
         siamese_train = SiameseDataset(dataset, ged_matrix, pair_mode='train', train_indices=train_indices)
-        siamese_val = SiameseDataset(dataset, ged_matrix, pair_mode='val', train_indices=train_indices, val_indices=val_indices)
+        siamese_val = SiameseDataset(dataset, ged_matrix, pair_mode='val', val_indices=val_indices)
         siamese_test = SiameseDataset(dataset, ged_matrix, pair_mode='test', train_indices=train_indices, test_indices=test_indices)
         return (
             DataLoader(siamese_train, batch_size=512, shuffle=True, num_workers=4),
-            DataLoader(siamese_val, batch_size=512, shuffle=False, num_workers=4),
+            DataLoader(siamese_val, batch_size=2056, shuffle=False, num_workers=4),
             DataLoader(siamese_test, batch_size=2056, shuffle=False, num_workers=4)
         )
