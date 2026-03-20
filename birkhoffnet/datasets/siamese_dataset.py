@@ -29,7 +29,10 @@ class SiameseDataset(Dataset):
         
         elif pair_mode == 'val':
             assert val_indices is not None
-            self.pairs = list(combinations(val_indices, r=2))
+            rng = random.Random(42)
+            all_pairs = list(combinations(val_indices, r=2))
+            n_samples = 4096
+            self.pairs = rng.sample(all_pairs, n_samples)
         
         elif pair_mode == 'test':
             assert train_indices is not None and test_indices is not None

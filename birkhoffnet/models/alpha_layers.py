@@ -131,8 +131,8 @@ class AlphaPermutationLayer(nn.Module):
         self.model = model
         self.temperature = 1.0
 
-        self.start = 0.3
-        self.end = 0.1
+        self.start = 1e-2
+        self.end = 2e-3
         self.n_epochs = n_epochs - 1
 
     def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
