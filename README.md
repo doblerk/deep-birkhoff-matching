@@ -76,6 +76,9 @@ Example configuration:
 ```json
 {
     "dataset": "AIDS",
+    "dataset_dir": "./data/datasets",
+    "metadata_dir": "./data/metadata",
+    "output_dir": "./res/"
     "device": "cuda",
 
     "model": {
@@ -111,10 +114,7 @@ Example configuration:
         "warmup": 100,
         "window": 10,
         "ema_decay": 0.0
-    },
-
-    "dataset_dir": "./data/",
-    "output_dir": "./res/"
+    }
 }
 ```
 

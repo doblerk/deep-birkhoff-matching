@@ -25,7 +25,7 @@ class ModelFactory:
 
         encoder_optimizer = torch.optim.AdamW(
             encoder.parameters(),
-            lr=config.training.lr,
+            lr=config.training.lr_triplet,
             weight_decay=config.training.weight_decay
         )
 
@@ -50,7 +50,8 @@ class ModelFactory:
 
         alpha_layer = AlphaPermutationLayer(
             perm_vectors,
-            AlphaMLP(encoder.output_dim, config.model.k)
+            AlphaMLP(encoder.output_dim, config.model.k),
+            config.training.epochs_siamese
         ).to(config.device)
 
         alpha_tracker = AlphaTracker(

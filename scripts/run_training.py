@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch_geometric.datasets import TUDataset
 from torch_geometric.transforms import Constant
 
-from birkhoffnet.utils.config import load_config, load_metadata
+from birkhoffnet.utils.config import load_data
 from birkhoffnet.utils.dataloader_utils import DataLoaders
 from birkhoffnet.utils.model_utils import ModelFactory
 from birkhoffnet.utils.trainer_utils import TripletTrainer, SiameseTrainer
@@ -15,15 +15,12 @@ from birkhoffnet.utils.trainer_utils import TripletTrainer, SiameseTrainer
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str, help='Path to parameters file')
-    parser.add_argument('--metadata', type=str, help='Path to metadata file')
-    parser.add_argument('--ged_data', type=str, help='Path to ged file')
     return parser
 
 
 def main(args):
     
-    config = load_config(args.params)
-    metadata = load_metadata(args.metadata)
+    config, metadata, ged_data = load_data(args.params)
 
     device = torch.device(config.device)
 
@@ -60,10 +57,8 @@ def main(args):
     # 3. Load GED matrices
     # --------------------------------------------------
 
-    data = torch.load(args.ged_data)
-
-    norm_ged_matrix = data["norm_ged_matrix"]
-    node_counts = data["node_counts"]
+    norm_ged_matrix = ged_data["norm_ged_matrix"]
+    node_counts = ged_data["node_counts"]
 
     max_nodes = int(torch.max(node_counts).item())
 

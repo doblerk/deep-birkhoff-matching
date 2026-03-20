@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -113,10 +114,8 @@ class AlphaPermutationLayer(nn.Module):
     def __init__(
             self, 
             perm_vectors: torch.Tensor, 
-            model: nn.Module, 
-            temperature: float = 1.0, 
-            freeze_epochs: int = 2,
-            entropy_weight: float = 0.02
+            model: nn.Module,
+            n_epochs: int
     ):
         """
         Args:
@@ -129,19 +128,12 @@ class AlphaPermutationLayer(nn.Module):
 
         self.k, self.n = perm_vectors.shape
 
-        self.temperature = temperature #nn.Parameter(torch.ones(1))
         self.model = model
-        
-        self.freeze_epochs = freeze_epochs
-        self.freeze_timer = 0
-        self._frozen = False
+        self.temperature = 1.0
 
-        self.entropy_weight = entropy_weight
-
-    # @property
-    # def temperature(self):
-    #     # ensure temperature > 0
-    #     return torch.exp(self.log_temp) + 1e-6
+        self.start = 0.3
+        self.end = 0.1
+        self.n_epochs = n_epochs - 1
 
     def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
         return F.softmax(alpha_logits / self.temperature, dim=1)
@@ -155,7 +147,6 @@ class AlphaPermutationLayer(nn.Module):
             self._set_requires_grad(False)
             self._frozen = True
             self.freeze_timer = self.freeze_epochs + 1
-            print("Freezing: ", self.freeze_timer)
     
     def unfreeze_module(self):
         if self._frozen:
@@ -165,11 +156,8 @@ class AlphaPermutationLayer(nn.Module):
     def update_freeze_timer(self):
         if not self._frozen:
             return
-        print("Updating...")
         self.freeze_timer -= 1
-        print(self.freeze_timer)
         if self.freeze_timer <= 0:
-            print("Unfreezing...")
             self.unfreeze_module()
 
     def set_permutations(self, new_perm_vectors: torch.Tensor):
@@ -177,15 +165,22 @@ class AlphaPermutationLayer(nn.Module):
     
     def get_entropy(self, alphas: torch.Tensor) -> torch.Tensor:
         entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=-1).mean()
+        entropy = entropy / math.log(self.k)
         return entropy
     
-    def mse_loss(self, input, target, use_entropy=False, alphas=None, epoch=None, entropy_weight=None):
+    def mse_loss(self, input, target, use_entropy=False, alphas=None, epoch=None):
+        
         loss = F.mse_loss(input, target, reduction="mean")
+        
         if use_entropy and alphas is not None:
+
             entropy = self.get_entropy(alphas)
-            weight = entropy_weight if entropy_weight is not None else self.entropy_weight
-            lambda_ent = weight * torch.exp(torch.tensor(-epoch / 50))
+
+            progress = min(epoch / self.n_epochs, 1.0)
+            lambda_ent = self.start + (self.end - self.start) * progress
+
             return loss - lambda_ent * entropy
+        
         return loss
 
     def forward(self, g1: torch.Tensor, g2: torch.Tensor):

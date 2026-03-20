@@ -2,22 +2,20 @@ import argparse
 
 import numpy as np
 
-from birkhoffnet.utils.config import load_config, load_metadata
+from birkhoffnet.utils.config import load_data
 from birkhoffnet.evaluation.knn_classifier import knn_classifier
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str, help='Path to parameters file')
-    parser.add_argument('--metadata', type=str, help='Path to metadata file')
     parser.add_argument('--distances', type=str, help='Path to ged file')
     return parser
 
 
 def main(args):
 
-    config = load_config(args.params)
-    metadata = load_metadata(args.metadata)
+    config, metadata, _ = load_data(args.params)
     distances = np.load(args.distances)
 
     knn_classifier(config, metadata, distances)

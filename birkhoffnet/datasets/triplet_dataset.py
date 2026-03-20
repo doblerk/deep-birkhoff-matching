@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 
 class TripletDataset(Dataset):
 
-    def __init__(self, graphs, indices, ged_matrix, k):
+    def __init__(self, graphs, indices, ged_matrix, k_pos, k_neg):
         
         super(TripletDataset, self).__init__()
         
@@ -14,7 +14,8 @@ class TripletDataset(Dataset):
         self.indices = indices
         # self.ged_dict = ged_dict
         self.ged_matrix = ged_matrix
-        self.k = k
+        self.k_pos = k_pos
+        self.k_neg = k_neg
 
         # Precompute sorted neighbors by GED
         # self.sorted_neighbors = {
@@ -42,7 +43,7 @@ class TripletDataset(Dataset):
 
             sims = self.ged_matrix[i, idx_tensor]
 
-            order = torch.argsort(sims, descending=True, stable=True)
+            order = torch.argsort(sims, descending=True, stable=True) # [1.0, ..., 0.0] larger = closer
 
             neighbors = idx_tensor[order].tolist()
 
@@ -63,11 +64,11 @@ class TripletDataset(Dataset):
         neighbors = self.sorted_neighbors[anchor_idx]
 
         # Hard positive = sample one of the top-k closest
-        pos_candidates = neighbors[:self.k]
+        pos_candidates = neighbors[:self.k_pos]
         pos_graph_idx = random.choice(pos_candidates)
 
         # Hard negative: sample one of the bottom-k farthest
-        neg_candidates = neighbors[-self.k:]
+        neg_candidates = neighbors[-self.k_neg:]
         neg_graph_idx = random.choice(neg_candidates)
 
         # pos_graph = self.graphs[pos_graph_idx]

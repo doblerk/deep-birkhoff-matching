@@ -14,7 +14,7 @@ from torch_geometric.transforms import Constant
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
 from birkhoffnet.losses.ged_loss import GEDLoss
 from birkhoffnet.utils.model_utils import ModelFactory
-from birkhoffnet.utils.config import load_config, load_metadata
+from birkhoffnet.utils.config import load_data
 
 
 @torch.no_grad()
@@ -86,15 +86,12 @@ def infer_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, num
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str, help='Path to parameters file')
-    parser.add_argument('--metadata', type=str, help='Path to metadata file')
-    parser.add_argument('--ged_data', type=str, help='Path to ged file')
     return parser
 
 
 def main(args):
 
-    config = load_config(args.params)
-    metadata = load_metadata(args.metadata)
+    config, metadata, ged_data = load_data(args.params)
 
     device = torch.device(config.device)
 
@@ -131,8 +128,6 @@ def main(args):
     # 3. Load GED matrices
     # --------------------------------------------------
 
-    ged_data = torch.load(args.ged_data)
-
     norm_ged_matrix = ged_data["norm_ged_matrix"]
     node_counts = ged_data["node_counts"]
 
@@ -159,19 +154,10 @@ def main(args):
     )
 
     encoder = components.modules.encoder
-    encoder_optimizer = components.optimizers.encoder
     alpha_layer = components.modules.alpha_layer
     cost_builder = components.modules.cost_builder
-
+    
     criterion = GEDLoss().to(config.device)
-
-    ged_optimizer = torch.optim.AdamW(
-        list(alpha_layer.parameters())
-        + list(cost_builder.parameters())
-        + list(criterion.parameters()),
-        lr=config.training.lr,
-        weight_decay=config.training.weight_decay
-    )
 
     # --------------------------------------------------
     # 6. Load checkpoints
@@ -181,13 +167,12 @@ def main(args):
     ckpt_encoder = torch.load(ckpt_encoder_path, map_location=device)
 
     encoder.load_state_dict(ckpt_encoder["encoder"])
-    encoder_optimizer.load_state_dict(ckpt_encoder["optimizer"])
 
     ckpt_ged_path = f"{config.output_dir}/ckpt_ged.pth"
     ckpt_ged = torch.load(ckpt_ged_path, map_location=device)
 
     alpha_layer.load_state_dict(ckpt_ged["alpha_layer"])
-    ged_optimizer.load_state_dict(ckpt_ged["optimizer"])
+    cost_builder.load_state_dict(ckpt_ged["cost_builder"])
     criterion.load_state_dict(ckpt_ged["criterion"])
 
     encoder.eval()
@@ -207,7 +192,13 @@ def main(args):
         test_indices=test_indices
     )
 
-    siamese_all_loader = DataLoader(siamese_all, batch_size=1024, shuffle=False, num_workers=10)
+    siamese_all_loader = DataLoader(
+        siamese_all, 
+        batch_size=2048, 
+        shuffle=False, 
+        num_workers=8,
+        pin_memory=True
+    )
 
     # --------------------------------------------------
     # 8. Infer all graph pairs

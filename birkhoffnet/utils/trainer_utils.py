@@ -26,6 +26,11 @@ class TripletTrainer:
 
         self.encoder.train()
 
+        best_gap = -float('inf')
+        patience_counter = 0
+        patience = 20
+        tol = 1e-4
+
         for epoch in range(self.config.training.epochs_triplet):
 
             total_loss = 0
@@ -65,22 +70,36 @@ class TripletTrainer:
 
             self.scheduler.step()
 
-            if epoch % 10 == 0:
+            avg_epoch_gap = total_gap / total_samples
+
+            if epoch % 1 == 0:
                 avg_loss = total_loss / total_samples
-                avg_epoch_gap = total_gap / total_samples
                 
                 print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
                       f"- Loss: {avg_loss:.4f} "
                       f"- gap: {avg_epoch_gap:.4f}"
                 )
 
-        self._save_checkpoint()
+            if avg_epoch_gap > best_gap + tol:
+                best_gap = avg_epoch_gap
+                patience_counter = 0
+                self._save_checkpoint()
+            else:
+                patience_counter += 1
+            
+            if patience_counter >= patience:
+                best_epoch = epoch - patience_counter
+                print(f"Early stopping at epoch {epoch+1}, best gap={best_gap:.4f} achieved at epoch {best_epoch+1}")
+                break
+
         return self.encoder
 
     def _save_checkpoint(self):
         torch.save({
             "encoder": self.encoder.state_dict(),
+            "criterion": self.criterion.state_dict(),
             "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict()
         }, f"{self.config.output_dir}/ckpt_encoder.pth")
 
 
@@ -112,8 +131,14 @@ class SiameseTrainer:
             list(alpha_layer.parameters())
             + list(cost_builder.parameters())
             + list(criterion.parameters()),
-            lr=config.training.lr,
+            lr=config.training.lr_siamese,
             weight_decay=config.training.weight_decay,
+        )
+
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer,
+            T_max=config.training.epochs_siamese,
+            eta_min=1e-8
         )
 
     # --------------------------------------------------------
@@ -121,46 +146,33 @@ class SiameseTrainer:
     # --------------------------------------------------------
 
     def train(self, train_loader, val_loader, test_loader):
-        # val_losses = []
-        entropy_count = torch.zeros(self.config.training.epochs_siamese, requires_grad=False, device='cpu')
-        neff_count = torch.zeros(self.config.training.epochs_siamese, requires_grad=False, device='cpu')
 
         for epoch in range(self.config.training.epochs_siamese):
 
-            self._train_one_epoch(train_loader, epoch, entropy_count, neff_count)
+            self._train_one_epoch(train_loader, epoch)
 
-            if epoch % 10 == 0:
+            if epoch % 1 == 0:
                 val_loss = self.evaluate(val_loader)
                 print(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
-                    f"- Val MSE: {val_loss:.4f} "
-                    f"- RMSE: {np.sqrt(val_loss):.4f} "
+                    f"- Val MSE: {val_loss:.6f} "
+                    f"- RMSE: {np.sqrt(val_loss):.6f} "
                     f"- Scale: {self.criterion.scale.item():.4f}"
                 )
-                # val_losses.append(val_loss)
 
-        test_loss = self.evaluate(test_loader)
-        print(
-            f"[GED] Final Test MSE: {test_loss:.4f} "
-            f"- RMSE: {np.sqrt(test_loss):.4f}"
-        )
-        # np.save(f"{self.config.output_dir}/modela_run1.npy", np.array(val_losses))
-        # res = {
-        #     "val_loss": np.array(val_losses),
-        #     "test_loss": test_loss,
-        #     "entropy": np.array(entropy_count),
-        #     "neff": np.array(neff_count)
-        # }
-        # with open(f"{self.config.output_dir}/modela_run1.pkl", "wb") as f:
-        #     pickle.dump(res, f)
-        # print("done!")
-        self._save_checkpoint()
+        # test_loss = self.evaluate(test_loader)
+        # print(
+        #     f"[GED] Final Test MSE: {test_loss:.6f} "
+        #     f"- RMSE: {np.sqrt(test_loss):.6f}"
+        # )
+
+        # self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step
     # --------------------------------------------------------
 
-    def _train_one_epoch(self, loader, epoch, entropy_count, neff_count):
+    def _train_one_epoch(self, loader, epoch):
 
         self.alpha_layer.train()
         self.criterion.train()
@@ -194,13 +206,6 @@ class SiameseTrainer:
                 graph_repr_b1, graph_repr_b2
             )
 
-            # --- just for analysis ---
-            # ent = self.alpha_layer.get_entropy(alphas) / len(loader)
-            # neff = 1.0 / (alphas ** 2).sum(dim=-1).mean()
-            # entropy_count[epoch] = ent.detach().cpu()
-            # neff_count[epoch] = neff.detach().cpu()
-            # -------------------------
-
             # Track alpha usage
             if self.config.perm_evo.evolve:
                 self.alpha_tracker.collect(alphas)
@@ -219,18 +224,17 @@ class SiameseTrainer:
                 ged_labels, 
                 use_entropy=self.config.training.use_entropy, 
                 alphas=alphas,
-                epoch=epoch,
-                entropy_weight=self.config.training.entropy_weight
+                epoch=epoch
             )
 
             loss.backward()
             self.optimizer.step()
+        
+        self.scheduler.step()
 
         # ----------------------------------
         # Genetic permutation evolution
         # ----------------------------------
-
-        # evolved = False
 
         if self.config.perm_evo.evolve:
 
@@ -249,14 +253,6 @@ class SiameseTrainer:
                 self.alpha_layer.set_permutations(new_perms)
 
                 # print("Vectors match:", torch.equal(self.perm_pool.get_vectors(), self.alpha_layer.perm_vectors))
-          
-                # if self.config.perm_evo.freeze_after_evolve:
-                #     self.alpha_layer.freeze_module()
-                
-                # evolved = True
-        
-        # if not evolved:
-        #     self.alpha_layer.update_freeze_timer() 
 
     # --------------------------------------------------------
     # Evaluation
@@ -318,7 +314,9 @@ class SiameseTrainer:
 
     def _save_checkpoint(self):
         torch.save({
-            'alpha_layer': self.alpha_layer.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'criterion': self.criterion.state_dict(),
+            "alpha_layer": self.alpha_layer.state_dict(),
+            "cost_builder": self.cost_builder.state_dict(),
+            "criterion": self.criterion.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict()
         }, f'{self.config.output_dir}/ckpt_ged.pth')
