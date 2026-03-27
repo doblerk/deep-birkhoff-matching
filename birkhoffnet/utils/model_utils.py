@@ -32,7 +32,7 @@ class ModelFactory:
         encoder_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             encoder_optimizer,
             T_max=config.training.epochs_triplet,
-            eta_min=1e-8
+            eta_min=1e-4
         )
 
         perm_pool = PermutationPool(
@@ -51,6 +51,7 @@ class ModelFactory:
         alpha_layer = AlphaPermutationLayer(
             perm_vectors,
             AlphaMLP(encoder.output_dim, config.model.k),
+            config.training.entropy_weight,
             config.training.epochs_siamese
         ).to(config.device)
 
@@ -63,7 +64,7 @@ class ModelFactory:
         cost_builder = CostMatrixBuilder(
             embedding_dim=config.model.embedding_dim,
             max_graph_size=max_graph_size,
-            use_learned_sub=False,
+            use_learned_sub=True,
             model_indel=None,
             rank=None
         ).to(config.device)

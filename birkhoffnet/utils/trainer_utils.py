@@ -3,7 +3,7 @@ import numpy as np
 import torch.nn.functional as F
 from birkhoffnet.utils.config import Config
 from birkhoffnet.losses.triplet_loss import TripletLoss
-
+import matplotlib.pyplot as plt
 
 # =========================================================
 # Triplet Trainer
@@ -138,7 +138,7 @@ class SiameseTrainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=config.training.epochs_siamese,
-            eta_min=1e-8
+            eta_min=1e-4
         )
 
     # --------------------------------------------------------
@@ -151,7 +151,7 @@ class SiameseTrainer:
 
             self._train_one_epoch(train_loader, epoch)
 
-            if epoch % 10 == 0:
+            if epoch % 100 == 0:
                 val_loss = self.evaluate(val_loader)
                 print(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
@@ -160,11 +160,11 @@ class SiameseTrainer:
                     f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
-        test_loss = self.evaluate(test_loader)
-        print(
-            f"[GED] Final Test MSE: {test_loss:.6f} "
-            f"- RMSE: {np.sqrt(test_loss):.6f}"
-        )
+        # test_loss = self.evaluate(test_loader)
+        # print(
+        #     f"[GED] Final Test MSE: {test_loss:.6f} "
+        #     f"- RMSE: {np.sqrt(test_loss):.6f}"
+        # )
 
         self._save_checkpoint()
 
@@ -202,6 +202,9 @@ class SiameseTrainer:
                 node_repr_b2, graph_repr_b2, batch2.batch
             )
 
+            # print(n_nodes_1[0], ' vs ', n_nodes_2[0])
+            # print(cost_matrices[0])
+
             soft_assignments, alphas = self.alpha_layer(
                 graph_repr_b1, graph_repr_b2
             )
@@ -215,6 +218,16 @@ class SiameseTrainer:
 
             row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
             soft_assignments = soft_assignments / row_sums
+
+            col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+            soft_assignments = soft_assignments / col_sums
+
+            # if epoch % 10 == 0:
+            #     print(n_nodes_1[0], ' vs ', n_nodes_2[0])
+            #     fig, (ax1, ax2) = plt.subplots(1, 2)
+            #     ax1.imshow(cost_matrices[0].detach().cpu().numpy())
+            #     ax2.imshow(soft_assignments[0].detach().cpu().numpy())
+            #     plt.show()
 
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
@@ -296,10 +309,26 @@ class SiameseTrainer:
 
             assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
             soft_assignments = soft_assignments * assignment_masks
+
             row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
             soft_assignments = soft_assignments / row_sums
 
+            col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+            soft_assignments = soft_assignments / col_sums
+
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
+            print(predicted_ged[:10].to(torch.int32).detach().cpu().numpy())
+            unormalized_ged = - normalization_factor[:10] * torch.log(ged_labels[:10].clamp(min=1e-8))
+            print(unormalized_ged.to(torch.int32).detach().cpu().numpy())
+
+            # print(n_nodes_1[0], ' vs ', n_nodes_2[0])
+            # b = cost_matrices[0] * soft_assignments[0]
+            # fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+            # ax1.imshow(cost_matrices[0].detach().cpu().numpy())
+            # ax2.imshow(soft_assignments[0].detach().cpu().numpy())
+            # ax3.imshow(b.detach().cpu().numpy())
+            # plt.show()
+
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
 
             loss = self.alpha_layer.mse_loss(

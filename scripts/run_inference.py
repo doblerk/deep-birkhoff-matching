@@ -66,6 +66,9 @@ def infer_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, num
         row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         soft_assignments = soft_assignments / row_sums
 
+        col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+        soft_assignments = soft_assignments / col_sums
+
         predicted_ged = criterion(cost_matrices, soft_assignments)
 
         normalized_predicted_ged = torch.exp(

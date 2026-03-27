@@ -20,7 +20,7 @@ class DataLoaders:
         siamese_val = SiameseDataset(dataset, ged_matrix, pair_mode='val', val_indices=val_indices)
         siamese_test = SiameseDataset(dataset, ged_matrix, pair_mode='test', train_indices=train_indices, test_indices=test_indices)
         return (
-            DataLoader(siamese_train, batch_size=512, shuffle=True, num_workers=4),
-            DataLoader(siamese_val, batch_size=2056, shuffle=False, num_workers=4),
-            DataLoader(siamese_test, batch_size=2056, shuffle=False, num_workers=4)
+            DataLoader(siamese_train, batch_size=len(siamese_train), shuffle=True, num_workers=4),
+            DataLoader(siamese_val, batch_size=2048, shuffle=False, num_workers=4),
+            DataLoader(siamese_test, batch_size=2048, shuffle=False, num_workers=4)
         )

@@ -21,22 +21,41 @@ class AlphaMLP(nn.Module):
         #     nn.ReLU(inplace=True),
         #     nn.Linear(input_dim * 4, k)
         # )
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(input_dim * 2, input_dim * 4),
+        #     nn.ReLU(inplace=True),
+        #     nn.LayerNorm(input_dim * 4),
+        #     nn.Dropout(0.2),
+            
+        #     nn.Linear(input_dim * 4, input_dim * 4),
+        #     nn.GELU(),
+        #     nn.LayerNorm(input_dim * 4),
+        #     nn.Dropout(0.2),
+
+        #     nn.Linear(input_dim * 4, k)
+        # )
         self.mlp = nn.Sequential(
-            nn.Linear(input_dim * 2, input_dim * 4),
+            nn.Linear(input_dim * 4, input_dim * 8),
             nn.ReLU(inplace=True),
-            nn.LayerNorm(input_dim * 4),
+            nn.LayerNorm(input_dim * 8),
             nn.Dropout(0.2),
             
-            nn.Linear(input_dim * 4, input_dim * 4),
+            nn.Linear(input_dim * 8, input_dim * 8),
             nn.GELU(),
-            nn.LayerNorm(input_dim * 4),
+            nn.LayerNorm(input_dim * 8),
             nn.Dropout(0.2),
 
-            nn.Linear(input_dim * 4, k)
+            nn.Linear(input_dim * 8, k)
         )
     
     def forward(self, g1, g2):
-        pair_repr = torch.cat([g1, g2], dim=-1)
+        # pair_repr = torch.cat([g1, g2], dim=-1)
+        pair_repr = torch.cat([
+            g1,
+            g2,
+            torch.abs(g1 - g2),
+            g1 * g2
+        ], dim=-1)
         # pair_repr = torch.abs(g1 - g2)
         return self.mlp(pair_repr)
 
@@ -115,6 +134,7 @@ class AlphaPermutationLayer(nn.Module):
             self, 
             perm_vectors: torch.Tensor, 
             model: nn.Module,
+            entropy_weight: float,
             n_epochs: int
     ):
         """
@@ -129,11 +149,12 @@ class AlphaPermutationLayer(nn.Module):
         self.k, self.n = perm_vectors.shape
 
         self.model = model
-        self.temperature = 1.0
+        self.temperature = 2.0
 
-        self.start = 1e-2
-        self.end = 2e-3
-        self.n_epochs = n_epochs - 1
+        # self.start = 0.1
+        # self.end = 0.02
+        # self.n_epochs = n_epochs - 1
+        self.entropy_weight = entropy_weight
 
     def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
         return F.softmax(alpha_logits / self.temperature, dim=1)
@@ -176,10 +197,18 @@ class AlphaPermutationLayer(nn.Module):
 
             entropy = self.get_entropy(alphas)
 
-            progress = min(epoch / self.n_epochs, 1.0)
-            lambda_ent = self.start + (self.end - self.start) * progress
+            scaled_entropy = self.entropy_weight * entropy * loss.detach()
 
-            return loss - lambda_ent * entropy
+            # progress = min(epoch / self.n_epochs, 1.0)
+            # lambda_ent = self.start + (self.end - self.start) * progress
+            if epoch % 100 == 0:
+                # print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {lambda_ent:.4f} x {entropy.item():.4f} -> fraction of total loss {(lambda_ent * entropy) / loss * 100:.4f}%")
+                # print(f"Entropy: {entropy}")
+                # print(f"Entropy to MSE ratio: {scaled_entropy / loss * 100}%")
+                print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {self.entropy_weight:.4f} x {entropy.item():.4f} x {loss.item():.4f} -> fraction of total loss {scaled_entropy:.4f} / {loss:.4f} * 100 = {scaled_entropy / loss * 100:.4f}%")
+
+            # return loss - lambda_ent * entropy
+            return loss - scaled_entropy
         
         return loss
 

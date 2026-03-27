@@ -31,7 +31,7 @@ from birkhoffnet.utils.data_utils import ged_matrix_to_dict, \
                                       pad_cost_matrices, \
                                       get_node_masks
 from birkhoffnet.utils.model_utils import ModelFactory
-from birkhoffnet.utils.config import load_config, load_metadata
+from birkhoffnet.utils.config import load_data
 
 
 class CustomGraphPairDataset(Dataset):
@@ -128,11 +128,17 @@ def plot_assignments_and_alphas(
     G1 = to_networkx(g1, to_undirected=True)
     G2 = to_networkx(g2, to_undirected=True)
 
+    real_n1 = len(G1.nodes)
+    real_n2 = len(G2.nodes)
+
     node_labels1 = g1.x.argmax(dim=1).numpy()
     node_labels2 = g2.x.argmax(dim=1).numpy()
 
     pos1 = nx.kamada_kawai_layout(G1)
     pos2 = nx.kamada_kawai_layout(G2)
+
+    for i in range(real_n1, real_n2):
+        pos1[i] = [-1.0, i - real_n1]
 
     for key in pos2:
         pos2[key][0] += 3  # Offset second graph
@@ -164,9 +170,18 @@ def plot_assignments_and_alphas(
         with_labels=False
     )
 
+    ax1.scatter(
+        [pos1[i][0] for i in range(real_n1, real_n2)],
+        [pos1[i][1] for i in range(real_n1, real_n2)],
+        color='black',
+        marker='x',
+        s=100,
+        label='Dummy G1'
+    )
+
     soft_assignment = soft_assignment.cpu()
 
-    for i in range(len(G1.nodes)):
+    for i in range(len(G2.nodes)):
         for j in range(len(G2.nodes)):
             
             weight = float(soft_assignment[i, j])
@@ -325,14 +340,11 @@ def plot_assignments_and_alphas(
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str, help='Path to parameters file')
-    parser.add_argument('--metadata', type=str, help='Path to metadata file')
-    parser.add_argument('--ged_data', type=str, help='Path to ged file')
     return parser
 
 def main(args):
 
-    config = load_config(args.params)
-    metadata = load_metadata(args.metadata)
+    config, metadata, ged_data = load_data(args.params)
 
     device = torch.device(config.device)
 
@@ -340,7 +352,7 @@ def main(args):
     # 1. Load dataset
     # --------------------------------------------------
 
-    dataset = TUDataset(
+    dataset_full = TUDataset(
         root=config.dataset_dir, 
         name=config.dataset,
         use_node_attr=False
@@ -352,11 +364,11 @@ def main(args):
 
     valid_indices = metadata["valid_graph_indices"]
 
+    dataset = [dataset_full[i] for i in valid_indices]
+
     # --------------------------------------------------
     # 3. Load GED matrices
     # --------------------------------------------------
-
-    ged_data = torch.load(args.ged_data)
 
     norm_ged_matrix = ged_data["norm_ged_matrix"]
     node_counts = ged_data["node_counts"]
@@ -367,38 +379,29 @@ def main(args):
     # 4. Build filtered dataset
     # --------------------------------------------------
 
-    filtered_dataset = [dataset[i] for i in valid_indices]
+    # filtered_dataset = [dataset[i] for i in valid_indices]
 
-    if filtered_dataset[0].x is None:
-        for g in filtered_dataset:
-            g.x = torch.ones((g.num_nodes, 1))
+    # if filtered_dataset[0].x is None:
+    #     for g in filtered_dataset:
+    #         g.x = torch.ones((g.num_nodes, 1))
 
-    num_features = filtered_dataset[0].num_node_features
+    # num_features = filtered_dataset[0].num_node_features
 
         # --------------------------------------------------
     # 5. Initialize models
     # --------------------------------------------------
 
     components = ModelFactory.initialize(
-        num_features=dataset.num_features,
+        num_features=dataset_full.num_features,
         max_graph_size=max_nodes,
         config=config
     )
 
     encoder = components.modules.encoder
-    encoder_optimizer = components.optimizers.encoder
     alpha_layer = components.modules.alpha_layer
     cost_builder = components.modules.cost_builder
 
     criterion = GEDLoss().to(config.device)
-
-    ged_optimizer = torch.optim.AdamW(
-        list(alpha_layer.parameters())
-        + list(cost_builder.parameters())
-        + list(criterion.parameters()),
-        lr=config.training.lr,
-        weight_decay=config.training.weight_decay
-    )
 
     # --------------------------------------------------
     # 6. Load checkpoints
@@ -408,34 +411,34 @@ def main(args):
     ckpt_encoder = torch.load(ckpt_encoder_path, map_location=device)
 
     encoder.load_state_dict(ckpt_encoder["encoder"])
-    encoder_optimizer.load_state_dict(ckpt_encoder["optimizer"])
 
     ckpt_ged_path = f"{config.output_dir}/ckpt_ged.pth"
     ckpt_ged = torch.load(ckpt_ged_path, map_location=device)
 
     alpha_layer.load_state_dict(ckpt_ged["alpha_layer"])
-    ged_optimizer.load_state_dict(ckpt_ged["optimizer"])
+    cost_builder.load_state_dict(ckpt_ged["cost_builder"])
     criterion.load_state_dict(ckpt_ged["criterion"])
 
     encoder.eval()
     alpha_layer.eval()
+    cost_builder.eval()
     criterion.eval()
 
     # --------------------------------------------------
     # 7. Select graphs
     # --------------------------------------------------
 
-    indices = [0, 0, 2, 3]
+    indices = [1, 4, 8, 2, 0, 3]
 
     print(
-        norm_ged_matrix[0, 0].item(),
-        norm_ged_matrix[0, 2].item(),
-        norm_ged_matrix[0, 3].item()
+        norm_ged_matrix[1, 4].item(),
+        norm_ged_matrix[1, 8].item(),
+        norm_ged_matrix[1, 2].item(),
+        norm_ged_matrix[1, 0].item(),
+        norm_ged_matrix[1, 3].item()
     )
 
-    selected_graphs = [filtered_dataset[i] for i in indices]
-
-    orig_indices = [valid_indices[i] for i in indices]
+    selected_graphs = [dataset[i] for i in indices]
 
     G0 = selected_graphs[0]
     others = selected_graphs[1:]
@@ -450,7 +453,7 @@ def main(args):
 
     loader = DataLoader(
         data,
-        batch_size=3,
+        batch_size=5,
         collate_fn=lambda batch: (
             Batch.from_data_list([x[0] for x in batch]),
             Batch.from_data_list([x[1] for x in batch]),
@@ -506,19 +509,26 @@ def main(args):
             row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
             soft_assignments = soft_assignments / row_sums
 
+            col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+            soft_assignments = soft_assignments / col_sums
+
             predicted_ged = criterion(cost_matrices, soft_assignments)
 
             normalized_predicted_ged = torch.exp(
                 -predicted_ged / normalization_factor
             )
 
-            print("Predicted similarity:", normalized_predicted_ged)
+            print(normalized_predicted_ged)
 
     # --------------------------------------------------
     # 9. Visualization
     # --------------------------------------------------
 
-    plot_assignments_and_alphas(dataset, orig_indices[0], orig_indices[1], soft_assignments[0].cpu(), alphas[0].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[1], soft_assignments[0].cpu(), alphas[0].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[2], soft_assignments[1].cpu(), alphas[1].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[3], soft_assignments[2].cpu(), alphas[2].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[4], soft_assignments[3].cpu(), alphas[3].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[5], soft_assignments[4].cpu(), alphas[4].cpu().numpy())
     # plot_assignments_and_alphas(indices[0], indices[2], soft_assignments[1], alphas[1].cpu().numpy())
     # plot_assignments_and_alphas(indices[0], indices[3], soft_assignments[2], alphas[2].cpu().numpy())
 
