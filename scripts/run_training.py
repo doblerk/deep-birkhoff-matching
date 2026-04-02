@@ -20,7 +20,7 @@ def get_args_parser():
 
 def main(args):
     
-    config, metadata, ged_data = load_data(args.params)
+    config, _, ged_data, valid_idx, train_idx, val_idx, test_idx = load_data(args.params)
 
     device = torch.device(config.device)
 
@@ -34,11 +34,14 @@ def main(args):
         use_node_attr=False
     )
 
+    if not hasattr(dataset_full[0], 'x') or dataset_full[0].x is None:
+        dataset_full.transform = Constant(value=1.0)
+
     # --------------------------------------------------
     # 2. Load metadata
     # --------------------------------------------------
     
-    valid_indices = metadata["valid_graph_indices"]
+    valid_indices = valid_idx.tolist()
 
     dataset = [dataset_full[i] for i in valid_indices]
 
@@ -46,9 +49,9 @@ def main(args):
     valid_idx_map = {orig_idx: i for i, orig_idx in enumerate(valid_indices)}
 
     # train/val/test in original indices
-    train_indices_orig = set(metadata["splits"]["train"])
-    val_indices_orig = set(metadata["splits"]["val"])
-    test_indices_orig = set(metadata["splits"]["test"])
+    train_indices_orig = set(train_idx.tolist())
+    val_indices_orig   = set(val_idx.tolist())
+    test_indices_orig  = set(test_idx.tolist())
 
     # map to 0..n_filtered-1
     train_indices = [valid_idx_map[i] for i in train_indices_orig]
@@ -101,6 +104,8 @@ def main(args):
         )
 
         encoder = triplet_trainer.train(loaders.triplet_loader)
+
+        encoder.eval()
         encoder.freeze_params(encoder)
     
     elif config.encoder.mode == "load":
@@ -144,6 +149,7 @@ def main(args):
         components.perm_pool,
         components.modules.cost_builder,
         components.criterion,
+        loaders.graph_loader,
         config=config,
     )
 

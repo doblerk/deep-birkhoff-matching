@@ -1,5 +1,6 @@
 from torch_geometric.loader import DataLoader
 from birkhoffnet.utils.data_utils import ged_matrix_to_dict
+from birkhoffnet.datasets.graph_dataset import GraphDataset
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
 from birkhoffnet.datasets.triplet_dataset import TripletDataset
 
@@ -7,8 +8,13 @@ from birkhoffnet.datasets.triplet_dataset import TripletDataset
 class DataLoaders:
     def __init__(self, dataset, train_indices, val_indices, test_indices, ged_matrix):
         # norm_ged_matrix = torch.exp(-ged_matrix) # -> range (0, 1] ?
+        self.graph_loader = self._create_graph_loader(dataset)
         self.triplet_loader = self._create_triplet_loader(dataset, train_indices, ged_matrix)
         self.train_loader, self.val_loader, self.test_loader = self._create_siamese_loaders(dataset, train_indices, val_indices, test_indices, ged_matrix)
+    
+    def _create_graph_loader(self, dataset):
+        graph_dataset = GraphDataset(dataset)
+        return DataLoader(graph_dataset, batch_size=len(dataset), shuffle=False)
 
     def _create_triplet_loader(self, dataset, train_indices, ged_matrix):
         # triplet_train = TripletDataset(dataset, train_indices, ged_matrix_to_dict(ged_matrix), k=int(len(train_indices) * 0.4))

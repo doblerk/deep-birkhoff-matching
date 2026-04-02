@@ -1,5 +1,6 @@
 import json
 import torch
+import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -22,7 +23,7 @@ class EncoderConfig:
 class PermutationEvolution:
     evolve: bool
     evolve_every: int
-    num_replace: int
+    replace_ratio: int
 
 
 @dataclass
@@ -92,4 +93,9 @@ def load_data(path: str) -> Config:
     metadata = load_json(metadata_path)
     ged_data = torch.load(ged_path)
 
-    return config, metadata, ged_data
+    valid_idx = np.load(metadata_dir / f"{config.dataset}_valid_idx.npy")
+    train_idx = np.load(metadata_dir / f"{config.dataset}_train_idx.npy")
+    val_idx   = np.load(metadata_dir / f"{config.dataset}_val_idx.npy")
+    test_idx  = np.load(metadata_dir / f"{config.dataset}_test_idx.npy")
+
+    return config, metadata, ged_data, valid_idx, train_idx, val_idx, test_idx

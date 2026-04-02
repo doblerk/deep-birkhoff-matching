@@ -2,7 +2,6 @@ import json
 import argparse
 import numpy as np
 from pathlib import Path
-from itertools import combinations
 from torch_geometric.datasets import TUDataset
 from sklearn.model_selection import train_test_split
 
@@ -19,33 +18,38 @@ def get_args_parser():
 def main(args):
 
     output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = TUDataset(root=args.dataset_dir, name=args.dataset_name)
 
-    node_counts = np.array([g.num_nodes for g in dataset])
-    edge_counts = np.array([g.num_edges for g in dataset])
+    # --- Single pass for stats ---
+    node_counts = np.empty(len(dataset), dtype=np.int32)
+    edge_counts = np.empty(len(dataset), dtype=np.int32)
+
+    for i, g in enumerate(dataset):
+        node_counts[i] = g.num_nodes
+        edge_counts[i] = g.num_edges
+
+    # --- Stats ---
+    mu = node_counts.mean()
+    sigma = node_counts.std()
 
     if args.use_subset:
-        mu = node_counts.mean()
-        sigma = node_counts.std()
-
         lower = mu - sigma
         upper = mu + sigma
 
-        valid_indices = [
-            i for i, g in enumerate(dataset)
-            if lower <= g.num_nodes <= upper
-        ]
+        valid_indices = np.where(
+            (node_counts >= lower) & (node_counts <= upper)
+        )[0]
     else:
-        valid_indices = list(range(len(dataset)))
-        mu = node_counts.mean()
-        sigma = node_counts.std()
+        valid_indices = np.arange(len(dataset), dtype=np.int32)
         lower, upper = None, None
+    
+    # --- Compute number of pairs without generating them ---
+    n_valid = len(valid_indices)
+    num_pairs = n_valid * (n_valid - 1) // 2
 
-    pairs = np.array(list(combinations(valid_indices, r=2)), dtype=np.int32)
-    np.save(output_dir / f"{args.dataset_name}_pairs.npy", pairs)
-
-    # splits
+    # --- Splits ---
     train_idx, temp_idx = train_test_split(
         valid_indices,
         test_size=0.4,
@@ -60,19 +64,26 @@ def main(args):
         shuffle=True
     )
 
+    # --- Save indices separately (faster reload, reusable) ---
+    np.save(output_dir / f"{args.dataset_name}_valid_idx.npy", valid_indices)
+    np.save(output_dir / f"{args.dataset_name}_train_idx.npy", train_idx)
+    np.save(output_dir / f"{args.dataset_name}_val_idx.npy", val_idx)
+    np.save(output_dir / f"{args.dataset_name}_test_idx.npy", test_idx)
+
+    # --- Metadata ---
     data = {
         "dataset": args.dataset_name,
         "num_graphs_total": len(dataset),
-        "num_graphs_filtered": len(valid_indices),
-        "num_total_pairs": len(pairs),
+        "num_graphs_filtered": int(n_valid),
+        "num_total_pairs": int(num_pairs),
 
         "node_stats": {
             "min_nodes": int(node_counts.min()),
             "max_nodes": int(node_counts.max()),
             "mean_nodes": float(mu),
             "std_nodes": float(sigma),
-            "lower_bound": float(lower),
-            "upper_bound": float(upper)
+            "lower_bound": float(lower) if lower is not None else None,
+            "upper_bound": float(upper) if upper is not None else None
         },
 
         "edge_stats": {
@@ -82,13 +93,13 @@ def main(args):
             "std_edges": float(edge_counts.std())
         },
 
-        "valid_graph_indices": valid_indices,
+        # "valid_graph_indices": valid_indices,
 
-        "splits": {
-            "train": train_idx.tolist(),
-            "val": val_idx.tolist(),
-            "test": test_idx.tolist()
-        }
+        # "splits": {
+        #     "train": train_idx.tolist(),
+        #     "val": val_idx.tolist(),
+        #     "test": test_idx.tolist()
+        # }
     }
 
     output_file = output_dir / f"{args.dataset_name}_metadata.json"

@@ -34,13 +34,26 @@ def edge_ins_cost(node):
 
 # ------------------------------------
 
+
+# ---------- UTILITIES ----------
+
+def idx_to_pair(k, n):
+    """
+    Map linear index k -> (i, j) for upper triangular matrix
+    """
+    i = int(n - 2 - np.floor(np.sqrt(-8*k + 4*n*(n-1)-7)/2 - 0.5))
+    j = int(k + i + 1 - n*(n-1)//2 + (n-i)*((n-i)-1)//2)
+    return i, j
+
+# ------------------------------------
+
+
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_dir', type=str, help='Path to dataset')
     parser.add_argument('--dataset_name', type=str, help='Dataset name')
     parser.add_argument('--output_dir', type=str, help='Path to output directory')
-    parser.add_argument('--pairs_file', type=str, help='Path to pairs file')
-    parser.add_argument('--metadata', type=str, help='Dataset metadata info')
+    parser.add_argument('--data_dir', type=str, help='Path to metadata and indices files')
     parser.add_argument('--timeout', type=float, default=None, help='Path to pairs directory')
     parser.add_argument('--start_idx', type=int, default=0)
     parser.add_argument('--end_idx', type=int, default=None)
@@ -50,6 +63,10 @@ def main(args):
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    data_dir = Path(args.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+
     log_file = output_dir / f'log_ged_{args.dataset_name}_{args.start_idx}_{args.end_idx}.txt'
     
     logging.basicConfig(
@@ -74,11 +91,13 @@ def main(args):
     # --------------------------------------------------
     # Load metadata
     # --------------------------------------------------
-    logging.info(f"Loading metadata info from {args.metadata}...")
-    with open(args.metadata, "r") as f:
+    logging.info(f"Loading metadata info from...")
+    
+    metadata_file = data_dir / f"{args.dataset_name}_metadata.json"
+    with open(metadata_file, "r") as f:
         info = json.load(f)
     
-    valid_idx = info["valid_graph_indices"]
+    # valid_idx = info["valid_graph_indices"]
     n_filtered = info["num_graphs_filtered"]
 
     logging.info(f"Number of filtered graphs: {n_filtered}")
@@ -87,13 +106,21 @@ def main(args):
     # Load pairs
     # --------------------------------------------------
     logging.info("Loading pairs...")
-    pairs = np.load(
-        args.pairs_file,
+
+    idx_file = data_dir / f"{args.dataset_name}_valid_idx.npy"
+    valid_idx = np.load(
+        idx_file,
         allow_pickle=True,
         mmap_mode="r"
     )
 
-    total_pairs = len(pairs)
+    # pairs = np.load(
+    #     args.pairs_file,
+    #     allow_pickle=True,
+    #     mmap_mode="r"
+    # )
+
+    total_pairs = info["num_total_pairs"]
     logging.info(f"Total pairs: {total_pairs}")
 
     # --------------------------------------------------
@@ -102,7 +129,16 @@ def main(args):
     start = args.start_idx
     end = min(args.end_idx, total_pairs)
 
+    pairs = list(combinations(valid_idx, r=2))
+
     subset_pairs = pairs[start:end]
+
+    # n = len(valid_idx)
+    # subset_pairs = [
+    #     (valid_idx[i], valid_idx[j])
+    #     for k in range(start, end)
+    #     for i, j in [idx_to_pair(k, n)]
+    # ]
 
     job_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
 
@@ -114,7 +150,7 @@ def main(args):
     logging.info("Converting graphs to networkx...")
     dataset_nx = {
         i: to_networkx(dataset[i], node_attrs='x', to_undirected=True)
-        for i in range(len(dataset))
+        for i in valid_idx
     }
 
     # --------------------------------------------------

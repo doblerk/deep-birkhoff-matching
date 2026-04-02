@@ -13,7 +13,9 @@ from torch_geometric.transforms import Constant
 
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
 from birkhoffnet.losses.ged_loss import GEDLoss
+from birkhoffnet.utils.dataloader_utils import DataLoaders
 from birkhoffnet.utils.model_utils import ModelFactory
+from birkhoffnet.utils.trainer_utils import SiameseTrainer
 from birkhoffnet.utils.config import load_data
 
 
@@ -71,11 +73,11 @@ def infer_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, num
 
         predicted_ged = criterion(cost_matrices, soft_assignments)
 
-        normalized_predicted_ged = torch.exp(
-            -predicted_ged / normalization_factor
-        )
+        # normalized_predicted_ged = torch.exp(
+        #     -predicted_ged / normalization_factor
+        # )
 
-        distance_matrix[idx1, idx2] = normalized_predicted_ged
+        distance_matrix[idx1, idx2] = predicted_ged
     
     t1 = time()
     runtime = t1 - t0
@@ -83,7 +85,11 @@ def infer_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, num
 
     distance_matrix = torch.maximum(distance_matrix, distance_matrix.T)
 
-    return distance_matrix.cpu().numpy()
+    # return distance_matrix.cpu().numpy()
+
+    # predicted_ged = -normalization_factor * torch.log(torch.tensor(distance_matrix))
+
+    return distance_matrix.to(torch.int32).cpu().numpy()
 
 
 def get_args_parser():
@@ -94,7 +100,7 @@ def get_args_parser():
 
 def main(args):
 
-    config, metadata, ged_data = load_data(args.params)
+    config, _, ged_data, valid_idx, train_idx, val_idx, test_idx = load_data(args.params)
 
     device = torch.device(config.device)
 
@@ -102,29 +108,34 @@ def main(args):
     # 1. Load dataset
     # --------------------------------------------------
 
-    dataset = TUDataset(
+    dataset_full = TUDataset(
         root=config.dataset_dir, 
         name=config.dataset,
         use_node_attr=False
     )
 
+    if not hasattr(dataset_full[0], 'x') or dataset_full[0].x is None:
+        dataset_full.transform = Constant(value=1.0)
+
     # --------------------------------------------------
     # 2. Metadata filtering
     # --------------------------------------------------
 
-    valid_indices = metadata["valid_graph_indices"]
+    valid_indices = valid_idx.tolist()
 
-    dataset_sub = [dataset[i] for i in valid_indices]
+    dataset = [dataset_full[i] for i in valid_indices]
 
     # valid_indices from metadata
     valid_idx_map = {orig_idx: i for i, orig_idx in enumerate(valid_indices)}
 
     # train/val/test in original indices
-    train_indices_orig = set(metadata["splits"]["train"])
-    test_indices_orig = set(metadata["splits"]["test"])
+    train_indices_orig = set(train_idx.tolist())
+    val_indices_orig   = set(val_idx.tolist())
+    test_indices_orig  = set(test_idx.tolist())
 
     # map to 0..n_filtered-1
     train_indices = [valid_idx_map[i] for i in train_indices_orig]
+    val_indices = [valid_idx_map[i] for i in val_indices_orig]
     test_indices = [valid_idx_map[i] for i in test_indices_orig]
 
     # --------------------------------------------------
@@ -137,21 +148,11 @@ def main(args):
     max_nodes = int(torch.max(node_counts).item())
 
     # --------------------------------------------------
-    # 4. Build filtered dataset
-    # --------------------------------------------------
-
-    filtered_dataset = [dataset[i] for i in valid_indices]
-
-    if filtered_dataset[0].x is None:
-        for g in filtered_dataset:
-            g.x = torch.ones((g.num_nodes, 1))
-
-    # --------------------------------------------------
-    # 5. Initialize models
+    # 4. Initialize models
     # --------------------------------------------------
 
     components = ModelFactory.initialize(
-        num_features=dataset.num_features,
+        num_features=dataset_full.num_features,
         max_graph_size=max_nodes,
         config=config
     )
@@ -163,7 +164,7 @@ def main(args):
     criterion = GEDLoss().to(config.device)
 
     # --------------------------------------------------
-    # 6. Load checkpoints
+    # 5. Load checkpoints
     # --------------------------------------------------
 
     ckpt_encoder_path = f"{config.output_dir}/ckpt_encoder.pth"
@@ -171,7 +172,7 @@ def main(args):
 
     encoder.load_state_dict(ckpt_encoder["encoder"])
 
-    ckpt_ged_path = f"{config.output_dir}/ckpt_ged.pth"
+    ckpt_ged_path = f"{config.output_dir}/ckpt_ged_evo.pth"
     ckpt_ged = torch.load(ckpt_ged_path, map_location=device)
 
     alpha_layer.load_state_dict(ckpt_ged["alpha_layer"])
@@ -184,42 +185,64 @@ def main(args):
     criterion.eval()
 
     # --------------------------------------------------
-    # 7. Initialize data loader
+    # 6. Initialize data loader
     # --------------------------------------------------
 
     siamese_all = SiameseDataset(
-        dataset_sub, 
+        dataset, 
         norm_ged_matrix, 
-        pair_mode='all', 
-        train_indices=train_indices, 
-        test_indices=test_indices
+        pair_mode='all'
+    )
+
+    loaders = DataLoaders(
+        dataset, 
+        train_indices,
+        val_indices,
+        test_indices,
+        norm_ged_matrix
     )
 
     siamese_all_loader = DataLoader(
         siamese_all, 
-        batch_size=2048, 
+        batch_size=4096, 
         shuffle=False, 
-        num_workers=8,
+        num_workers=10,
         pin_memory=True
     )
 
     # --------------------------------------------------
-    # 8. Infer all graph pairs
+    # 7. Infer all graph pairs
     # --------------------------------------------------
 
-    distances = infer_ged(
-        siamese_all_loader, 
-        encoder, 
-        alpha_layer,
-        cost_builder,
-        criterion,
-        device,
-        len(valid_indices)
+    # distances = infer_ged(
+    #     siamese_all_loader, 
+    #     encoder, 
+    #     alpha_layer,
+    #     cost_builder,
+    #     criterion,
+    #     device,
+    #     len(valid_indices)
+    # )
+
+    siamese_trainer = SiameseTrainer(
+        encoder,
+        components.modules.alpha_layer,
+        components.alpha_tracker,
+        components.perm_pool,
+        components.modules.cost_builder,
+        components.criterion,
+        loaders.graph_loader,
+        config=config,
     )
 
-    output_file = Path(config.output_dir) / "distances.npy"
-    with open(output_file, 'wb') as file:
-        np.save(file, distances)
+    distances = siamese_trainer.infer(
+        siamese_all_loader,
+        len(dataset)
+    )
+
+    # output_file = Path(config.output_dir) / "distances_evo.npy"
+    # with open(output_file, 'wb') as file:
+    #     np.save(file, distances)
 
 
 if __name__ == '__main__':

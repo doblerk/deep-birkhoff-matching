@@ -38,12 +38,12 @@ class AlphaMLP(nn.Module):
             nn.Linear(input_dim * 4, input_dim * 8),
             nn.ReLU(inplace=True),
             nn.LayerNorm(input_dim * 8),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             
             nn.Linear(input_dim * 8, input_dim * 8),
             nn.GELU(),
             nn.LayerNorm(input_dim * 8),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
 
             nn.Linear(input_dim * 8, k)
         )
@@ -134,8 +134,13 @@ class AlphaPermutationLayer(nn.Module):
             self, 
             perm_vectors: torch.Tensor, 
             model: nn.Module,
-            entropy_weight: float,
-            n_epochs: int
+            n_epochs: int,
+            entropy_weight: float = 0.01,
+            k_min: float = 5.0,
+            init_temperature: float = 3.0,
+            min_temp: float = 1.0,
+            max_temp: float = 5.0,
+            mixing_eps: float = 0.02
     ):
         """
         Args:
@@ -144,54 +149,111 @@ class AlphaPermutationLayer(nn.Module):
         """
         super().__init__()
 
+        # Permutations
         self.register_buffer("perm_vectors", perm_vectors.clone())
-
         self.k, self.n = perm_vectors.shape
 
+        # Alpha generator
         self.model = model
-        self.temperature = 2.0
 
-        # self.start = 0.1
-        # self.end = 0.02
-        # self.n_epochs = n_epochs - 1
+        # Learnable temperature
+        # self.log_temperature = nn.Parameter(torch.tensor(0.0))
+        self.temperature = 1.0
+        self.min_temp = min_temp
+        self.max_temp = max_temp
+
+        # Regularization
         self.entropy_weight = entropy_weight
+        self.k_min = k_min
+        self.target_entropy = math.log(self.k_min) / math.log(self.k)
 
-    def get_alpha_weights(self, alpha_logits: torch.Tensor) -> torch.Tensor:
-        return F.softmax(alpha_logits / self.temperature, dim=1)
-    
-    def _set_requires_grad(self, flag: bool):
-        for p in self.model.parameters():
-            p.requires_grad_(flag)
-    
-    def freeze_module(self):
-        if not self._frozen:
-            self._set_requires_grad(False)
-            self._frozen = True
-            self.freeze_timer = self.freeze_epochs + 1
-    
-    def unfreeze_module(self):
-        if self._frozen:
-            self._set_requires_grad(True)
-            self._frozen = False
-    
-    def update_freeze_timer(self):
-        if not self._frozen:
-            return
-        self.freeze_timer -= 1
-        if self.freeze_timer <= 0:
-            self.unfreeze_module()
+        # Mixing safeguard
+        self.mixing_eps = mixing_eps
 
-    def set_permutations(self, new_perm_vectors: torch.Tensor):
-        self.perm_vectors.copy_(new_perm_vectors.to(self.perm_vectors.device))
+        # Entropy annealing
+        self.n_epochs = n_epochs
     
-    def get_entropy(self, alphas: torch.Tensor) -> torch.Tensor:
-        entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=-1).mean()
-        entropy = entropy / math.log(self.k)
-        return entropy
-    
-    def mse_loss(self, input, target, use_entropy=False, alphas=None, epoch=None):
+    # --------------------------------------------------
+    # Temperature
+    # --------------------------------------------------
+    def get_temperature(self):
+        return self.min_temp + (self.max_temp - self.min_temp) * torch.sigmoid(self.log_temperature) # shifted sigmoid to max_temp
+
+    # --------------------------------------------------
+    # Alpha weights
+    # --------------------------------------------------
+    def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
+        return F.softmax(logits / self.temperature, dim=1)
+        # logits = logits - logits.mean(dim=1, keepdim=True)
+        # logits = logits / (logits.std(dim=1, keepdim=True) + 1e-6)
         
-        loss = F.mse_loss(input, target, reduction="mean")
+        # T = self.get_temperature()
+        
+        # alphas = F.softmax(logits / T, dim=1)
+        
+        # # if self.mixing_eps > 0:
+        # #     alphas = (1 - self.mixing_eps) * alphas + self.mixing_eps / self.k
+        
+        # return alphas
+
+    # --------------------------------------------------
+    # Entropy
+    # --------------------------------------------------
+    def get_entropy(self, alphas: torch.Tensor) -> torch.Tensor:
+        entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=-1)
+        return entropy.mean() / math.log(self.k)
+
+    def get_kl_to_uniform(self, logits: torch.Tensor) -> torch.Tensor:
+        alphas_raw = F.softmax(logits, dim=1)
+        uniform = torch.full_like(alphas_raw, 1.0 / self.k)
+        kl = (alphas_raw * (alphas_raw / uniform).clamp_min(1e-8).log()).sum(dim=-1)
+        return kl.mean()
+    
+    def effective_k(self, alphas: torch.Tensor) -> torch.Tensor:
+        entropy = self.get_entropy(alphas)
+        return torch.exp(entropy * math.log(self.k))
+    
+    # --------------------------------------------------
+    # Loss
+    # --------------------------------------------------
+    def mse_loss(self, pred, target, use_entropy=False, alphas=None, epoch=None):
+        
+        # mse = F.mse_loss(pred, target, reduction="mean")
+        # loss = mse
+        
+        # if alphas is not None:
+        #     entropy = self.get_entropy(alphas)
+        #     eff_k = self.effective_k(alphas)
+
+        #     # entropy_loss = -entropy
+
+        #     # k_floor_loss = F.relu(self.k_min - eff_k)
+
+        #     # progress = epoch / self.n_epochs
+        #     # lambda_entropy = self.entropy_weight * (1 - progress)
+
+        #     # loss = loss + self.entropy_weight * (entropy_loss + k_floor_loss)
+
+        #     entropy_loss = ((entropy - self.target_entropy) ** 2) / (self.target_entropy + 1e-6)
+
+        #     # optional annealing
+        #     progress = epoch / self.n_epochs if epoch is not None else 0.0
+        #     lambda_entropy = self.entropy_weight * (1 - progress)
+
+        #     loss = loss + lambda_entropy * entropy_loss #* mse.detach()
+        
+        # if epoch is not None and epoch % 50 == 0:
+        #     print(
+        #         f"[Epoch {epoch}] "
+        #         f"MSE: {mse.item():.4f} | "
+        #         f"H: {entropy.item():.3f} | "
+        #         f"eff_k: {eff_k.item():.1f} | "
+        #         f"T: {self.get_temperature().item():.2f}"
+        #     )
+        
+        # return loss
+
+        loss = F.mse_loss(pred, target, reduction="mean")
         
         if use_entropy and alphas is not None:
 
@@ -199,22 +261,35 @@ class AlphaPermutationLayer(nn.Module):
 
             scaled_entropy = self.entropy_weight * entropy * loss.detach()
 
-            # progress = min(epoch / self.n_epochs, 1.0)
-            # lambda_ent = self.start + (self.end - self.start) * progress
-            if epoch % 100 == 0:
-                # print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {lambda_ent:.4f} x {entropy.item():.4f} -> fraction of total loss {(lambda_ent * entropy) / loss * 100:.4f}%")
-                # print(f"Entropy: {entropy}")
-                # print(f"Entropy to MSE ratio: {scaled_entropy / loss * 100}%")
-                print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {self.entropy_weight:.4f} x {entropy.item():.4f} x {loss.item():.4f} -> fraction of total loss {scaled_entropy:.4f} / {loss:.4f} * 100 = {scaled_entropy / loss * 100:.4f}%")
+            # # progress = min(epoch / self.n_epochs, 1.0)
+            # # lambda_ent = self.start + (self.end - self.start) * progress
+            # if epoch % 50 == 0:
+            #     # print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {lambda_ent:.4f} x {entropy.item():.4f} -> fraction of total loss {(lambda_ent * entropy) / loss * 100:.4f}%")
+            #     # print(f"Entropy: {entropy}")
+            #     # print(f"Entropy to MSE ratio: {scaled_entropy / loss * 100}%")
+            #     print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {self.entropy_weight:.4f} x {entropy.item():.4f} x {loss.item():.4f} -> fraction of total loss {scaled_entropy:.4f} / {loss:.4f} * 100 = {scaled_entropy / loss * 100:.4f}%")
 
             # return loss - lambda_ent * entropy
             return loss - scaled_entropy
         
         return loss
+    
+    # --------------------------------------------------
+    # Utilities
+    # --------------------------------------------------
+    def _set_requires_grad(self, flag: bool):
+        for p in self.model.parameters():
+            p.requires_grad_(flag)
 
+    def set_permutations(self, new_perm_vectors: torch.Tensor):
+        self.perm_vectors.copy_(new_perm_vectors.to(self.perm_vectors.device))
+
+    # --------------------------------------------------
+    # Forward pass
+    # --------------------------------------------------
     def forward(self, g1: torch.Tensor, g2: torch.Tensor):
-        alpha_logits = self.model(g1, g2)
-        alphas = self.get_alpha_weights(alpha_logits)
+        logits = self.model(g1, g2)
+        alphas = self.get_alpha_weights(logits)
 
         # ----------------------------
         # Build soft permutation

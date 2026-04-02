@@ -206,6 +206,12 @@ class PermutationPool:
 
         return c1, c2
     
+    def _mutate(self, perm, prob=0.2):
+        if torch.rand(1).item() < prob:
+            i, j = torch.randint(0, self.n, (2,))
+            perm[i], perm[j] = perm[j].clone(), perm[i].clone()
+        return perm
+    
     # --------------------------------------------------
     # Evolution
     # --------------------------------------------------
@@ -214,21 +220,35 @@ class PermutationPool:
         """
         Replaces the k worst perms with offspring produced by the k best perms.
         """
-        best_idx = sorted_idx[-k:]
+        # best_idx = sorted_idx[-k:]
+        n = len(sorted_idx)
+
+        elite_size = max(k, int(0.5 * n))
+        elite_idx = sorted_idx[-elite_size:]
+
         worst_idx = sorted_idx[:k]
 
         # For each worst individual, generate a new child from the best parents
         for wi in worst_idx:
             # Randomly choose 2 distinct parents from top-k
-            parent_indices = torch.randperm(k)[:2]
-            p1 = self.perm_vectors[best_idx[parent_indices[0]]]
-            p2 = self.perm_vectors[best_idx[parent_indices[1]]]
+            # parent_indices = torch.randperm(k)[:2]
+            # p1 = self.perm_vectors[best_idx[parent_indices[0]]]
+            # p2 = self.perm_vectors[best_idx[parent_indices[1]]]
+            parents = elite_idx[torch.randperm(elite_size)[:2]]
+
+            p1 = self.perm_vectors[parents[0]]
+            p2 = self.perm_vectors[parents[1]]
 
             # Perform mating
             c1, c2 = self._partially_mapped_crossover(p1, p2)
 
             # Randomly choose one child
             child = c1 if torch.rand(1).item() < 0.5 else c2
+
+            child = self._mutate(child)
+
+            assert self._is_valid_permutation(child), "Invalid permutation generated!"
+
             self.perm_vectors[wi] = child
     
     # --------------------------------------------------
@@ -256,7 +276,11 @@ class PermutationPool:
         return unique
     
     def _is_valid_permutation(self, perm):
-        return torch.unique(perm).numel() == len(perm)
+        n = perm.numel()
+        return torch.equal(
+            torch.sort(perm).values,
+            torch.arange(n, device=perm.device)
+        )
     
     # --------------------------------------------------
     # Public API

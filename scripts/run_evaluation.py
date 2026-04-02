@@ -1,5 +1,6 @@
 import argparse
 
+# import torch
 import numpy as np
 
 from birkhoffnet.utils.config import load_data
@@ -21,13 +22,8 @@ def main(args):
     knn_classifier(config, metadata, distances)
 
     # ged = torch.load("./res/new_analysis/data/AIDS/AIDS_ged_matrices.pt")
-
     # normalization_factor = ged["norm_factor_matrix"]
-
     # predicted_ged = -normalization_factor * torch.log(torch.tensor(distances))
-
-    # print(predicted_ged[0])
-
     # knn_classifier(config, metadata, predicted_ged.numpy())
 
  

@@ -39,7 +39,6 @@ class SiameseDataset(Dataset):
             self.pairs = list(product(test_indices, train_indices))
         
         elif pair_mode == 'all':
-            assert train_indices is not None and test_indices is not None
             self.pairs = list(combinations(range(len(graphs)), r=2))
         
         else:
@@ -61,8 +60,10 @@ class SiameseDataset(Dataset):
 
             if random.random() < 0.2:
                 idx2 = idx1
+                # g1 = self.graphs[idx1].clone()
+                # g2 = g1.clone()
                 g1 = self.graphs[idx1]
-                g2 = g1.clone()
+                g2 = g1
                 norm_ged = torch.tensor(1.0) # 1.0 for GED range (0, 1], 0.0 otherwise
             
             else:
@@ -87,6 +88,7 @@ class SiameseDataset(Dataset):
         # Order graphs consistently
         if g1.num_nodes > g2.num_nodes:
             g1, g2 = g2, g1
+            idx1, idx2 = idx2, idx1
 
         if self.pair_mode == 'all':
             return g1, g2, norm_ged, idx1, idx2
