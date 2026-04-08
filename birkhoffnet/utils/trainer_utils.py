@@ -155,7 +155,7 @@ class SiameseTrainer:
 
             self._train_one_epoch(train_loader, epoch)
 
-            # if epoch % 10 == 0:
+            # if epoch % 100 == 0:
             #     val_loss = self.evaluate(val_loader)
             #     print(
             #         f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
@@ -353,9 +353,9 @@ class SiameseTrainer:
             )
 
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
-            # print(predicted_ged[:20].to(torch.int32).detach().cpu().numpy())
-            # unormalized_ged = - normalization_factor * torch.log(ged_labels.clamp(min=1e-8))
-            # print(unormalized_ged[:20].to(torch.int32).detach().cpu().numpy())
+            print(predicted_ged[:20].to(torch.int32).detach().cpu().numpy())
+            unormalized_ged = - normalization_factor * torch.log(ged_labels.clamp(min=1e-8))
+            print(unormalized_ged[:20].to(torch.int32).detach().cpu().numpy())
 
             # print(n_nodes_1[0], ' vs ', n_nodes_2[0])
             # b = cost_matrices[0] * soft_assignments[0]
@@ -495,12 +495,11 @@ class SiameseTrainer:
 
         return S
 
-
-    # def _save_checkpoint(self):
-    #     torch.save({
-    #         "alpha_layer": self.alpha_layer.state_dict(),
-    #         "cost_builder": self.cost_builder.state_dict(),
-    #         "criterion": self.criterion.state_dict(),
-    #         "optimizer": self.optimizer.state_dict(),
-    #         "scheduler": self.scheduler.state_dict()
-    #     }, f'{self.config.output_dir}/ckpt_ged.pth')
+    def _save_checkpoint(self):
+        torch.save({
+            "alpha_layer": self.alpha_layer.state_dict(),
+            "cost_builder": self.cost_builder.state_dict(),
+            "criterion": self.criterion.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict()
+        }, f'{self.config.output_dir}/ckpt_ged.pth')

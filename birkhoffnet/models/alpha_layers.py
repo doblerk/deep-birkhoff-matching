@@ -137,8 +137,8 @@ class AlphaPermutationLayer(nn.Module):
             n_epochs: int,
             entropy_weight: float = 0.01,
             k_min: float = 5.0,
-            init_temperature: float = 3.0,
-            min_temp: float = 1.0,
+            k_floor_weight: float = 0.1,
+            min_temp: float = 0.5,
             max_temp: float = 5.0,
             mixing_eps: float = 0.02
     ):
@@ -164,7 +164,10 @@ class AlphaPermutationLayer(nn.Module):
 
         # Regularization
         self.entropy_weight = entropy_weight
-        self.k_min = k_min
+        self.k_floor_weight = k_floor_weight
+        self.k_min = int(self.k * 0.1) + 1 #k_min
+
+        # Target entropy (normalized)
         self.target_entropy = math.log(self.k_min) / math.log(self.k)
 
         # Mixing safeguard
@@ -176,25 +179,28 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     # Temperature
     # --------------------------------------------------
-    def get_temperature(self):
-        return self.min_temp + (self.max_temp - self.min_temp) * torch.sigmoid(self.log_temperature) # shifted sigmoid to max_temp
+    def get_temperature(self, epoch: int):
+        progress = min(epoch / self.n_epochs, 1.0)
+        return self.max_temp - (self.max_temp - self.min_temp) * progress
+        # return self.min_temp + (self.max_temp - self.min_temp) * torch.sigmoid(self.log_temperature) # shifted sigmoid to max_temp
 
     # --------------------------------------------------
     # Alpha weights
     # --------------------------------------------------
     def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
-        return F.softmax(logits / self.temperature, dim=1)
+        # return F.softmax(logits / self.temperature, dim=1)
+
         # logits = logits - logits.mean(dim=1, keepdim=True)
         # logits = logits / (logits.std(dim=1, keepdim=True) + 1e-6)
         
-        # T = self.get_temperature()
+        # T = self.get_temperature(epoch)
         
-        # alphas = F.softmax(logits / T, dim=1)
+        alphas = F.softmax(logits / self.temperature, dim=1)
         
-        # # if self.mixing_eps > 0:
-        # #     alphas = (1 - self.mixing_eps) * alphas + self.mixing_eps / self.k
+        if self.mixing_eps > 0:
+            alphas = (1 - self.mixing_eps) * alphas + self.mixing_eps / self.k
         
-        # return alphas
+        return alphas
 
     # --------------------------------------------------
     # Entropy
@@ -203,11 +209,11 @@ class AlphaPermutationLayer(nn.Module):
         entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=-1)
         return entropy.mean() / math.log(self.k)
 
-    def get_kl_to_uniform(self, logits: torch.Tensor) -> torch.Tensor:
-        alphas_raw = F.softmax(logits, dim=1)
-        uniform = torch.full_like(alphas_raw, 1.0 / self.k)
-        kl = (alphas_raw * (alphas_raw / uniform).clamp_min(1e-8).log()).sum(dim=-1)
-        return kl.mean()
+    # def get_kl_to_uniform(self, logits: torch.Tensor) -> torch.Tensor:
+    #     alphas_raw = F.softmax(logits, dim=1)
+    #     uniform = torch.full_like(alphas_raw, 1.0 / self.k)
+    #     kl = (alphas_raw * (alphas_raw / uniform).clamp_min(1e-8).log()).sum(dim=-1)
+    #     return kl.mean()
     
     def effective_k(self, alphas: torch.Tensor) -> torch.Tensor:
         entropy = self.get_entropy(alphas)
@@ -218,16 +224,32 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     def mse_loss(self, pred, target, use_entropy=False, alphas=None, epoch=None):
         
-        # mse = F.mse_loss(pred, target, reduction="mean")
-        # loss = mse
+        mse = F.mse_loss(pred, target, reduction="mean")
+        loss = mse
         
-        # if alphas is not None:
-        #     entropy = self.get_entropy(alphas)
-        #     eff_k = self.effective_k(alphas)
+        if alphas is not None:
+            entropy = self.get_entropy(alphas)
+            eff_k = self.effective_k(alphas)
 
-        #     # entropy_loss = -entropy
+            # entropy_loss = (entropy - self.target_entropy) ** 2
+            entropy_loss = F.relu(self.target_entropy - entropy)
 
-        #     # k_floor_loss = F.relu(self.k_min - eff_k)
+            k_floor_loss = F.relu(self.k_min - eff_k)
+
+            loss = loss \
+                + self.entropy_weight * entropy_loss \
+                + self.k_floor_weight * k_floor_loss
+
+            if epoch % 50 == 0:
+                print(
+                    f"[Epoch {epoch}] "
+                    f"MSE: {mse.item():.4f} | "
+                    f"H: {entropy.item():.3f} | "
+                    f"target_H: {self.target_entropy:.3f} | "
+                    f"eff_k: {eff_k.item():.2f} | "
+                    f"k_min: {self.k_min} | "
+                    # f"T: {self.get_temperature(epoch):.2f}"
+                )
 
         #     # progress = epoch / self.n_epochs
         #     # lambda_entropy = self.entropy_weight * (1 - progress)
@@ -253,24 +275,25 @@ class AlphaPermutationLayer(nn.Module):
         
         # return loss
 
-        loss = F.mse_loss(pred, target, reduction="mean")
+        # loss = F.mse_loss(pred, target, reduction="mean")
         
-        if use_entropy and alphas is not None:
+        # if use_entropy and alphas is not None:
 
-            entropy = self.get_entropy(alphas)
+        #     entropy = self.get_entropy(alphas)
 
-            scaled_entropy = self.entropy_weight * entropy * loss.detach()
+        #     scaled_entropy = self.entropy_weight * entropy #* loss.detach()
 
-            # # progress = min(epoch / self.n_epochs, 1.0)
-            # # lambda_ent = self.start + (self.end - self.start) * progress
-            # if epoch % 50 == 0:
-            #     # print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {lambda_ent:.4f} x {entropy.item():.4f} -> fraction of total loss {(lambda_ent * entropy) / loss * 100:.4f}%")
-            #     # print(f"Entropy: {entropy}")
-            #     # print(f"Entropy to MSE ratio: {scaled_entropy / loss * 100}%")
-            #     print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {self.entropy_weight:.4f} x {entropy.item():.4f} x {loss.item():.4f} -> fraction of total loss {scaled_entropy:.4f} / {loss:.4f} * 100 = {scaled_entropy / loss * 100:.4f}%")
+        #     # # progress = min(epoch / self.n_epochs, 1.0)
+        #     # # lambda_ent = self.start + (self.end - self.start) * progress
+        #     if epoch % 50 == 0:
+        #         # print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {lambda_ent:.4f} x {entropy.item():.4f} -> fraction of total loss {(lambda_ent * entropy) / loss * 100:.4f}%")
+        #         # print(f"Entropy: {entropy}")
+        #         # print(f"Entropy to MSE ratio: {scaled_entropy / loss * 100}%")
+        #         # print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {self.entropy_weight:.4f} x {entropy.item():.4f} x {loss.item():.4f} -> fraction of total loss {scaled_entropy:.4f} / {loss:.4f} * 100 = {scaled_entropy / loss * 100:.4f}%")
+        #         print(f"Epoch: {epoch + 1}: {loss.item():.4f} - {self.entropy_weight:.4f} x {entropy.item():.4f} -> fraction of total loss {scaled_entropy:.4f} / {loss:.4f} * 100 = {scaled_entropy / loss * 100:.4f}%")
 
-            # return loss - lambda_ent * entropy
-            return loss - scaled_entropy
+        #     # return loss - lambda_ent * entropy
+        #     return loss - scaled_entropy
         
         return loss
     

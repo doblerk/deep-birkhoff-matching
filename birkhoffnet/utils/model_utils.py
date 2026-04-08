@@ -64,7 +64,7 @@ class ModelFactory:
         cost_builder = CostMatrixBuilder(
             embedding_dim=config.model.embedding_dim,
             max_graph_size=max_graph_size,
-            use_learned_sub=True,
+            use_learned_sub=False,
             model_indel=None,
             rank=None
         ).to(config.device)

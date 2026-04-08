@@ -23,7 +23,7 @@ class EncoderConfig:
 class PermutationEvolution:
     evolve: bool
     evolve_every: int
-    replace_ratio: int
+    replace_ratio: float
 
 
 @dataclass

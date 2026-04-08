@@ -208,7 +208,7 @@ class PermutationPool:
     
     def _mutate(self, perm, prob=0.2):
         if torch.rand(1).item() < prob:
-            i, j = torch.randint(0, self.n, (2,))
+            i, j = torch.randint(0, self.max_n, (2,))
             perm[i], perm[j] = perm[j].clone(), perm[i].clone()
         return perm
     

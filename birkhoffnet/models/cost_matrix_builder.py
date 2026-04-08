@@ -71,7 +71,8 @@ class CostMatrixBuilder(nn.Module):
             # weighted h1 = H1 @ W
             weighted_h1 = torch.einsum('bnd,dk->bnk', H1, W)
             s = torch.einsum('bnk,bmk->bnm', weighted_h1, H2)
-            s = (s - s.mean()) / (s.std() + 1e-8)      
+            # s = (s - s.mean()) / (s.std() + 1e-8) # per batch normalization
+            s = (s - s.mean(dim=(1,2), keepdim=True)) / (s.std(dim=(1,2), keepdim=True) + 1e-8) # per-pair normalization
             # convert similarity to positive cost (higher similarity -> lower cost)
             C = F.softplus(-s + self.sub_bias) + 1e-8 # (B, N, N)
         
@@ -141,33 +142,34 @@ class CostMatrixBuilder(nn.Module):
         # else:
         #     C = subs
 
-        counts1 = mask1.sum(dim=1)
-        counts2 = mask2.sum(dim=1)
+        # Indel cost model
+        # counts1 = mask1.sum(dim=1)
+        # counts2 = mask2.sum(dim=1)
 
-        # Add learnable epsilon rows for insertion
-        # eps_mat = torch.zeros_like(C)
+        # # Add learnable epsilon rows for insertion
+        # # eps_mat = torch.zeros_like(C)
 
-        valid_mask = mask1.unsqueeze(2) & mask2.unsqueeze(1)
-        mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
+        # valid_mask = mask1.unsqueeze(2) & mask2.unsqueeze(1)
+        # mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
 
-        # scale learnable eps with batch statistics
-        eps_rows_scaled = F.softplus(self.eps_rows) * mean_sub_cost.detach()
+        # # scale learnable eps with batch statistics
+        # eps_rows_scaled = F.softplus(self.eps_rows) * mean_sub_cost.detach()
 
-        row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
+        # row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
 
-        eps_row_mask_per_graph = (
-            (row_idx >= counts1.unsqueeze(1)) &
-            (row_idx < counts2.unsqueeze(1))
-        )
+        # eps_row_mask_per_graph = (
+        #     (row_idx >= counts1.unsqueeze(1)) &
+        #     (row_idx < counts2.unsqueeze(1))
+        # )
 
-        eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
+        # eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
 
-        eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
-        eps_values = eps_values.expand(B, -1, N_max)
+        # eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
+        # eps_values = eps_values.expand(B, -1, N_max)
 
-        C = torch.where(eps_row_mask, eps_values, C)
+        # C = torch.where(eps_row_mask, eps_values, C)
 
-        updated_mask1 = mask1 | eps_row_mask_per_graph
+        # updated_mask1 = mask1 | eps_row_mask_per_graph
 
         return C, updated_mask1, mask2
 
