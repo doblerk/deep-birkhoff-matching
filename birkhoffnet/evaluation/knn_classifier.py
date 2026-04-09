@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from torch_geometric.datasets import TUDataset
 
 
-def knn_classifier(config, metadata, distances, n_repeat=5, test_size=0.2):
+def knn_classifier(config, distances, valid_indices, n_repeat=5, test_size=0.2):
     """
     k-NN classification using a precomputed distance matrix over a subset of valid indices.
 
@@ -22,7 +22,6 @@ def knn_classifier(config, metadata, distances, n_repeat=5, test_size=0.2):
     labels_all = dataset._data.y.numpy()
 
     # Select labels corresponding to valid indices
-    valid_indices = metadata["valid_graph_indices"]
     # distances = distances[np.ix_(valid_indices, valid_indices)]
     labels = labels_all[valid_indices]
     num_classes = int(dataset.num_classes)

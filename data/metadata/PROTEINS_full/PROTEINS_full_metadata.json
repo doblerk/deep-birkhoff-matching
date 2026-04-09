@@ -1,0 +1,20 @@
+{
+    "dataset": "PROTEINS_full",
+    "num_graphs_total": 1113,
+    "num_graphs_filtered": 1011,
+    "num_total_pairs": 510555,
+    "node_stats": {
+        "min_nodes": 4,
+        "max_nodes": 620,
+        "mean_nodes": 39.05750224618149,
+        "std_nodes": 45.758421863948776,
+        "lower_bound": -6.700919617767283,
+        "upper_bound": 84.81592411013027
+    },
+    "edge_stats": {
+        "min_edges": 10,
+        "max_edges": 2098,
+        "mean_edges": 145.6316262353998,
+        "std_edges": 169.19809006257566
+    }
+}

@@ -16,10 +16,10 @@ def get_args_parser():
 
 def main(args):
 
-    config, metadata, _ = load_data(args.params)
+    config, _, _, valid_indices, _, _, _ = load_data(args.params)
     distances = np.load(args.distances)
 
-    knn_classifier(config, metadata, distances)
+    knn_classifier(config, distances, valid_indices)
 
     # ged = torch.load("./res/new_analysis/data/AIDS/AIDS_ged_matrices.pt")
     # normalization_factor = ged["norm_factor_matrix"]
