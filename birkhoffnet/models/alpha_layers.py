@@ -157,8 +157,8 @@ class AlphaPermutationLayer(nn.Module):
         self.model = model
 
         # Learnable temperature
-        # self.log_temperature = nn.Parameter(torch.tensor(0.0))
-        self.temperature = 1.0
+        self.log_temperature = nn.Parameter(torch.tensor(0.0))
+        # self.temperature = 1.0
         self.min_temp = min_temp
         self.max_temp = max_temp
 
@@ -179,10 +179,10 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     # Temperature
     # --------------------------------------------------
-    def get_temperature(self, epoch: int):
-        progress = min(epoch / self.n_epochs, 1.0)
-        return self.max_temp - (self.max_temp - self.min_temp) * progress
-        # return self.min_temp + (self.max_temp - self.min_temp) * torch.sigmoid(self.log_temperature) # shifted sigmoid to max_temp
+    def get_temperature(self):
+        # progress = min(epoch / self.n_epochs, 1.0)
+        # return self.max_temp - (self.max_temp - self.min_temp) * progress
+        return self.min_temp + (self.max_temp - self.min_temp) * torch.sigmoid(self.log_temperature) # shifted sigmoid to max_temp
 
     # --------------------------------------------------
     # Alpha weights
@@ -190,15 +190,15 @@ class AlphaPermutationLayer(nn.Module):
     def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
         # return F.softmax(logits / self.temperature, dim=1)
 
-        # logits = logits - logits.mean(dim=1, keepdim=True)
-        # logits = logits / (logits.std(dim=1, keepdim=True) + 1e-6)
+        logits = logits - logits.mean(dim=1, keepdim=True)
+        logits = logits / (logits.std(dim=1, keepdim=True) + 1e-6)
         
-        # T = self.get_temperature(epoch)
+        T = self.get_temperature()
         
-        alphas = F.softmax(logits / self.temperature, dim=1)
+        alphas = F.softmax(logits / T, dim=1)
         
-        if self.mixing_eps > 0:
-            alphas = (1 - self.mixing_eps) * alphas + self.mixing_eps / self.k
+        # if self.mixing_eps > 0:
+            # alphas = (1 - self.mixing_eps) * alphas + self.mixing_eps / self.k
         
         return alphas
 
@@ -228,28 +228,34 @@ class AlphaPermutationLayer(nn.Module):
         loss = mse
         
         if alphas is not None:
-            entropy = self.get_entropy(alphas)
-            eff_k = self.effective_k(alphas)
-
-            # entropy_loss = (entropy - self.target_entropy) ** 2
-            entropy_loss = F.relu(self.target_entropy - entropy)
-
-            k_floor_loss = F.relu(self.k_min - eff_k)
-
-            loss = loss \
-                + self.entropy_weight * entropy_loss \
-                + self.k_floor_weight * k_floor_loss
-
-            if epoch % 50 == 0:
+            if epoch % 20 == 0:
                 print(
                     f"[Epoch {epoch}] "
                     f"MSE: {mse.item():.4f} | "
-                    f"H: {entropy.item():.3f} | "
-                    f"target_H: {self.target_entropy:.3f} | "
-                    f"eff_k: {eff_k.item():.2f} | "
-                    f"k_min: {self.k_min} | "
-                    # f"T: {self.get_temperature(epoch):.2f}"
+                    f"T: {self.get_temperature():.2f}"
                 )
+            # entropy = self.get_entropy(alphas)
+            # eff_k = self.effective_k(alphas)
+
+            # entropy_loss = (entropy - self.target_entropy) ** 2
+            # # entropy_loss = F.relu(self.target_entropy - entropy)
+
+            # k_floor_loss = F.relu(self.k_min - eff_k)
+
+            # loss = loss \
+            #     + self.entropy_weight * entropy_loss \
+            #     + self.k_floor_weight * k_floor_loss
+
+            # if epoch % 50 == 0:
+            #     print(
+            #         f"[Epoch {epoch}] "
+            #         f"MSE: {mse.item():.4f} | "
+            #         f"H: {entropy.item():.3f} | "
+            #         f"target_H: {self.target_entropy:.3f} | "
+            #         f"eff_k: {eff_k.item():.2f} | "
+            #         f"k_min: {self.k_min} | "
+            #         # f"T: {self.get_temperature(epoch):.2f}"
+            #     )
 
         #     # progress = epoch / self.n_epochs
         #     # lambda_entropy = self.entropy_weight * (1 - progress)
@@ -281,7 +287,7 @@ class AlphaPermutationLayer(nn.Module):
 
         #     entropy = self.get_entropy(alphas)
 
-        #     scaled_entropy = self.entropy_weight * entropy #* loss.detach()
+        #     scaled_entropy = self.entropy_weight * entropy * loss.detach()
 
         #     # # progress = min(epoch / self.n_epochs, 1.0)
         #     # # lambda_ent = self.start + (self.end - self.start) * progress
