@@ -23,7 +23,8 @@ class CostMatrixBuilder(nn.Module):
         else:
             self.sub_L = None
         
-        self.eps_rows = nn.Parameter(torch.ones(max_graph_size))
+        # self.eps_rows = nn.Parameter(torch.ones(max_graph_size))
+        self.eps = nn.Parameter(torch.tensor(1.0))
     
     def to_dense_node_embeddings(self, node_repr, batch_vec):
         """
@@ -66,16 +67,20 @@ class CostMatrixBuilder(nn.Module):
             # compute batched p-norm (default Euclidean)
             C = torch.cdist(H1, H2, p=2)
         else:
+            H1 = F.normalize(H1, dim=-1)
+            H2 = F.normalize(H2, dim=-1)
             # build W = L @ L^T (guaranteed to be PSD)
             W = self.L @ self.L.T
+            W = W / (W.norm() + 1e-8)
             # weighted h1 = H1 @ W
             weighted_h1 = torch.einsum('bnd,dk->bnk', H1, W)
             s = torch.einsum('bnk,bmk->bnm', weighted_h1, H2)
             # s = (s - s.mean()) / (s.std() + 1e-8) # per batch normalization
-            s = (s - s.mean(dim=(1,2), keepdim=True)) / (s.std(dim=(1,2), keepdim=True) + 1e-8) # per-pair normalization
+            # s = (s - s.mean(dim=(1,2), keepdim=True)) / (s.std(dim=(1,2), keepdim=True) + 1e-8) # per-pair normalization
             # convert similarity to positive cost (higher similarity -> lower cost)
-            C = F.softplus(-s + self.sub_bias) + 1e-8 # (B, N, N)
-        
+            # C = F.softplus(-s + self.sub_bias) # (B, N, N)
+            C = F.softplus(-s + self.sub_bias)
+
         C = C.masked_fill(~mask, 0.0)
         return C
     
@@ -150,10 +155,24 @@ class CostMatrixBuilder(nn.Module):
         # eps_mat = torch.zeros_like(C)
 
         valid_mask = mask1.unsqueeze(2) & mask2.unsqueeze(1)
-        mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
 
-        # scale learnable eps with batch statistics
-        eps_rows_scaled = F.softplus(self.eps_rows) * mean_sub_cost.detach()
+        # mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
+        valid_counts = valid_mask.sum(dim=(1,2)).clamp(min=1)   # (B,)
+
+        # mean substitution cost per graph
+        mean_sub_cost = (subs * valid_mask).sum(dim=(1,2)) / valid_counts  # (B,)
+
+        # scale learnable eps with graph statistics
+        # learn scalar epsilon and scale it based on graph pair statistics
+        # eps_rows = F.softplus(self.eps_rows) #* mean_sub_cost.detach()
+        eps = F.softplus(self.eps)
+
+        # eps_rows = eps_rows.unsqueeze(0)
+
+        # mean_sub_cost = mean_sub_cost.unsqueeze(1)
+
+        # eps_rows_scaled = eps_rows * mean_sub_cost
+        eps_scaled = eps * mean_sub_cost.detach()
 
         row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
 
@@ -164,8 +183,12 @@ class CostMatrixBuilder(nn.Module):
 
         eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
 
-        eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
-        eps_values = eps_values.expand(B, -1, N_max)
+        # eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
+        # eps_values = eps_rows_scaled.unsqueeze(2)
+        # eps_values = eps_values.expand(B, -1, N_max)
+        # eps_values = eps_values.expand(-1, -1, N_max)
+        # broadcast scalar per graph
+        eps_values = eps_scaled.view(B, 1, 1).expand(-1, N_max, N_max)
 
         C = torch.where(eps_row_mask, eps_values, C)
 

@@ -161,7 +161,7 @@ class SiameseTrainer:
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
                     f"- Val MSE: {val_loss:.6f} "
                     f"- RMSE: {np.sqrt(val_loss):.6f} "
-                    f"- Scale: {self.criterion.scale.item():.4f}"
+                    # f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
         # test_loss = self.evaluate(test_loader)
@@ -353,9 +353,9 @@ class SiameseTrainer:
             )
 
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
-            print(predicted_ged[:20].to(torch.int32).detach().cpu().numpy())
-            unormalized_ged = - normalization_factor * torch.log(ged_labels.clamp(min=1e-8))
-            print(unormalized_ged[:20].to(torch.int32).detach().cpu().numpy())
+            # print(predicted_ged[:20].to(torch.int32).detach().cpu().numpy())
+            # unormalized_ged = - normalization_factor * torch.log(ged_labels.clamp(min=1e-8))
+            # print(unormalized_ged[:20].to(torch.int32).detach().cpu().numpy())
 
             # print(n_nodes_1[0], ' vs ', n_nodes_2[0])
             # b = cost_matrices[0] * soft_assignments[0]
@@ -470,9 +470,9 @@ class SiameseTrainer:
 
         num_graphs = max(g for g, _ in all_node) + 1
 
-        node_cache = torch.zeros((num_graphs, max_nodes, node_dim))
-        mask_cache = torch.zeros((num_graphs, max_nodes), dtype=torch.bool)
-        graph_cache = torch.zeros((num_graphs, graph_repr.size(1)))
+        node_cache = torch.zeros((num_graphs, max_nodes, node_dim), device=device)
+        mask_cache = torch.zeros((num_graphs, max_nodes), dtype=torch.bool, device=device)
+        graph_cache = torch.zeros((num_graphs, graph_repr.size(1)), device=device)
 
         for (gid, n) in all_node:
             node_cache[gid, :n.size(0)] = n
