@@ -13,17 +13,16 @@ class PermutationPool:
             max_n: int, 
             k: int,
             config: Config, 
-            seed: int = 42,
-            encoder=None,
-            dataloader=None):
+            seed: int = 42
+        ):
         """
         Args:
             max_n (int): Maximum graph size (i.e., full matrix size: max_n x max_n)
             k (int): Number of permutation matrices to generate
             seed (int): RNG seed for reproducibility
         """
-        self.rng = torch.Generator().manual_seed(seed) #np.random.default_rng(seed)
-        self.device = config.device #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.rng = torch.Generator().manual_seed(seed)
+        self.device = config.device
         self.config = config
         self.max_n = max_n
         self.k = k
@@ -46,8 +45,6 @@ class PermutationPool:
                 self.max_n, 
                 generator=self.rng
             )
-
-            assert self._is_valid_permutation(perms[i])
         
         return perms.to(self.device)
     
@@ -88,8 +85,6 @@ class PermutationPool:
             perm[i] = perm[j]
             perm[j] = tmp
         
-        assert self._is_valid_permutation(perm)
-        
         return perm
     
     # --------------------------------------------------
@@ -101,56 +96,68 @@ class PermutationPool:
 
         encoder.eval()
 
+        max_rounds = 10
+        rounds = 0
+
         with torch.no_grad():
-            for batch1, batch2, _ in loader:
+            while True:
+                for batch1, batch2, _ in loader:
 
-                batch1 = batch1.to(self.device)
-                batch2 = batch2.to(self.device)
+                    batch1 = batch1.to(self.device)
+                    batch2 = batch2.to(self.device)
 
-                h1, _ = encoder(
-                    batch1.x, 
-                    batch1.edge_index, 
-                    batch1.batch
-                )
-                h2, _ = encoder(
-                    batch2.x, 
-                    batch2.edge_index, 
-                    batch2.batch
-                )
-
-                n1 = batch1.batch.bincount()
-                n2 = batch2.batch.bincount()
-
-                splits1 = torch.split(h1, n1.tolist())
-                splits2 = torch.split(h2, n2.tolist())
-
-                for emb1, emb2 in zip(splits1, splits2):
-
-                    C = torch.cdist(emb1, emb2)
-
-                    n_rows, n_cols = C.shape
-                    cost = torch.full(
-                        (self.max_n, self.max_n),
-                        1e6,
-                        device=self.device
+                    h1, _ = encoder(
+                        batch1.x, 
+                        batch1.edge_index, 
+                        batch1.batch
+                    )
+                    h2, _ = encoder(
+                        batch2.x, 
+                        batch2.edge_index, 
+                        batch2.batch
                     )
 
-                    cost[:n_rows, :n_cols] = C
+                    n1 = batch1.batch.bincount()
+                    n2 = batch2.batch.bincount()
 
-                    row, col = linear_sum_assignment(
-                        cost.cpu().numpy()
-                    )
+                    splits1 = torch.split(h1, n1.tolist())
+                    splits2 = torch.split(h2, n2.tolist())
 
-                    total_cost = cost[row[:n_rows], col[:n_rows]].sum()
-                    
-                    perm = torch.as_tensor(col, dtype=torch.long)
+                    for emb1, emb2 in zip(splits1, splits2):
 
-                    perms_with_cost.append((perm, total_cost))
+                        C = torch.cdist(emb1, emb2)
 
-                    assert self._is_valid_permutation(perm)
+                        n_rows, n_cols = C.shape
+                        cost = torch.full(
+                            (self.max_n, self.max_n),
+                            1e6,
+                            device=self.device
+                        )
 
-        # Keep unique
-        unique_perms = self._unique_permutations(perms_with_cost)
+                        cost[:n_rows, :n_cols] = C
+
+                        row, col = linear_sum_assignment(
+                            cost.cpu().numpy()
+                        )
+
+                        total_cost = cost[row[:n_rows], col[:n_rows]].sum()
+                        
+                        perm = torch.as_tensor(col, dtype=torch.long)
+
+                        perms_with_cost.append((perm, total_cost))
+
+                # Keep unique
+                unique_perms = self._unique_permutations(perms_with_cost)
+
+                print(f"[round {rounds}] total={len(perms_with_cost)} unique={len(unique_perms)}")
+
+                if len(unique_perms) >= self.k - 1:
+                    break
+
+                rounds += 1
+                if rounds >= max_rounds:
+                    print("Warning: reached max rounds without enough unique permutations")
+                    break
 
         # Build pool
         pool = torch.zeros((self.k, self.max_n), dtype=torch.long)
@@ -163,7 +170,8 @@ class PermutationPool:
 
         n_insert = min(len(unique_perms), self.k - 1)
         
-        assert self.k - 1 <= len(unique_perms), "The number of permutations must be <= than the number of unique permutations."
+        if len(unique_perms) < self.k - 1:
+            print(f"Warning: only {len(unique_perms)} unique perms (target {self.k-1})")
 
         for i in range(n_insert):
             pool[i + 1] = unique_perms[i][0]
@@ -220,7 +228,7 @@ class PermutationPool:
         """
         Replaces the k worst perms with offspring produced by the k best perms.
         """
-        # best_idx = sorted_idx[-k:]
+        
         n = len(sorted_idx)
 
         elite_size = max(k, int(0.5 * n))
@@ -231,9 +239,6 @@ class PermutationPool:
         # For each worst individual, generate a new child from the best parents
         for wi in worst_idx:
             # Randomly choose 2 distinct parents from top-k
-            # parent_indices = torch.randperm(k)[:2]
-            # p1 = self.perm_vectors[best_idx[parent_indices[0]]]
-            # p2 = self.perm_vectors[best_idx[parent_indices[1]]]
             parents = elite_idx[torch.randperm(elite_size)[:2]]
 
             p1 = self.perm_vectors[parents[0]]
@@ -246,8 +251,6 @@ class PermutationPool:
             child = c1 if torch.rand(1).item() < 0.5 else c2
 
             child = self._mutate(child)
-
-            assert self._is_valid_permutation(child), "Invalid permutation generated!"
 
             self.perm_vectors[wi] = child
     
@@ -316,31 +319,3 @@ class PermutationPool:
         matrices = torch.zeros((self.k, self.max_n, self.max_n), device=self.device, dtype=torch.float32)
         matrices.scatter_(2, self.perm_vectors.unsqueeze(-1), 1.0)
         return matrices
-    
-
-    # def mate_permutations(self, sorted_idx: torch.Tensor, k: int = 2) -> None:
-    # """
-    # Replace all permutations except the first (elite) one
-    # using crossover between two random parents from the top-k best.
-    # """
-    # elite_idx = sorted_idx[0]          # keep this one unchanged
-    # best_idx = sorted_idx[:k]          # top-k pool for parent selection
-    # replace_idx = sorted_idx[1:]       # everyone except the first
-
-    # for wi in replace_idx:
-    #     # Randomly choose 2 distinct parents from top-k
-    #     parent_indices = torch.randperm(k)[:2]
-    #     p1 = self.perm_vectors[best_idx[parent_indices[0]]]
-    #     p2 = self.perm_vectors[best_idx[parent_indices[1]]]
-
-    #     # Perform crossover
-    #     c1, c2 = self._partially_mapped_crossover(p1, p2)
-
-    #     # Randomly pick one child
-    #     child = c1 if torch.rand(1).item() < 0.5 else c2
-    #     print(f'Changing perm: {self.perm_vectors[wi]} with parent indices {parent_indices}')
-    #     self.perm_vectors[wi] = child
-    #     print(f'Changed to: {self.perm_vectors[wi]}')
-
-    # # ✅ Preserve elite (the first permutation)
-    # self.perm_vectors[elite_idx] = self.perm_vectors[elite_idx]

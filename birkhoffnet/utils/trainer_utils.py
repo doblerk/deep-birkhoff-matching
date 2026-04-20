@@ -159,9 +159,9 @@ class SiameseTrainer:
                 val_loss = self.evaluate(val_loader)
                 print(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
-                    f"- Val MSE: {val_loss:.6f} "
-                    f"- RMSE: {np.sqrt(val_loss):.6f} "
-                    # f"- Scale: {self.criterion.scale.item():.4f}"
+                    f"- Val MSE: {val_loss:.4f} "
+                    f"- RMSE: {np.sqrt(val_loss):.4f} "
+                    f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
         # test_loss = self.evaluate(test_loader)
@@ -204,25 +204,6 @@ class SiameseTrainer:
 
             self.optimizer.zero_grad()
 
-            # node_repr_b1, graph_repr_b1 = self._get_cached_embeddings(batch1)
-            # node_repr_b2, graph_repr_b2 = self._get_cached_embeddings(batch2)
-
-            # with torch.no_grad():
-            #     node_repr_b1, graph_repr_b1 = self.encoder(
-            #         batch1.x, batch1.edge_index, batch1.batch
-            #     )
-            #     node_repr_b2, graph_repr_b2 = self.encoder(
-            #         batch2.x, batch2.edge_index, batch2.batch
-            #     )
-
-            # cost_matrices, masks1, masks2 = self.cost_builder(
-            #     node_repr_b1, graph_repr_b1, batch1.batch,
-            #     node_repr_b2, graph_repr_b2, batch2.batch
-            # )
-
-            # print(n_nodes_1[0], ' vs ', n_nodes_2[0])
-            # print(cost_matrices[0])
-
             cost_matrices, mask1, mask2 = self.cost_builder(
                 node_repr_b1, mask1,
                 node_repr_b2, mask2
@@ -239,13 +220,6 @@ class SiameseTrainer:
             soft_assignments = self._normalize_assignment(
                 soft_assignments, mask1, mask2
             )
-
-            # if epoch % 10 == 0:
-            #     print(n_nodes_1[0], ' vs ', n_nodes_2[0])
-            #     fig, (ax1, ax2) = plt.subplots(1, 2)
-            #     ax1.imshow(cost_matrices[0].detach().cpu().numpy())
-            #     ax2.imshow(soft_assignments[0].detach().cpu().numpy())
-            #     plt.show()
 
             predicted_ged = self.criterion(cost_matrices, soft_assignments)
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
@@ -324,21 +298,6 @@ class SiameseTrainer:
             n_nodes_2 = mask2.sum(dim=1)
             normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
-            # node_repr_b1, graph_repr_b1 = self.encoder(
-            #     batch1.x, batch1.edge_index, batch1.batch
-            # )
-            # node_repr_b2, graph_repr_b2 = self.encoder(
-            #     batch2.x, batch2.edge_index, batch2.batch
-            # )
-
-            # node_repr_b1, graph_repr_b1 = self._get_cached_embeddings(batch1)
-            # node_repr_b2, graph_repr_b2 = self._get_cached_embeddings(batch2)
-
-            # cost_matrices, masks1, masks2 = self.cost_builder(
-            #     node_repr_b1, graph_repr_b1, batch1.batch,
-            #     node_repr_b2, graph_repr_b2, batch2.batch
-            # )
-
             cost_matrices, mask1, mask2 = self.cost_builder(
                 node_repr_b1, mask1,
                 node_repr_b2, mask2
@@ -356,14 +315,6 @@ class SiameseTrainer:
             # print(predicted_ged[:20].to(torch.int32).detach().cpu().numpy())
             # unormalized_ged = - normalization_factor * torch.log(ged_labels.clamp(min=1e-8))
             # print(unormalized_ged[:20].to(torch.int32).detach().cpu().numpy())
-
-            # print(n_nodes_1[0], ' vs ', n_nodes_2[0])
-            # b = cost_matrices[0] * soft_assignments[0]
-            # fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-            # ax1.imshow(cost_matrices[0].detach().cpu().numpy())
-            # ax2.imshow(soft_assignments[0].detach().cpu().numpy())
-            # ax3.imshow(b.detach().cpu().numpy())
-            # plt.show()
 
             normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
 
@@ -404,11 +355,6 @@ class SiameseTrainer:
             node_repr_b2 = self.node_cache[idx2]
             mask2 = self.mask_cache[idx2]
             graph_repr_b2 = self.graph_cache[idx2]
-
-            # cost_matrices, masks1, masks2 = self.cost_builder(
-            #     node_repr_b1, graph_repr_b1, batch1.batch,
-            #     node_repr_b2, graph_repr_b2, batch2.batch
-            # )
 
             cost_matrices, mask1, mask2 = self.cost_builder(
                 node_repr_b1, mask1,
