@@ -139,7 +139,7 @@ class AlphaPermutationLayer(nn.Module):
     def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
 
         logits = logits - logits.mean(dim=1, keepdim=True)
-        logits = logits / (logits.std(dim=1, keepdim=True) + 1e-6)
+        logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
         
         T = self.get_temperature()
         
@@ -169,17 +169,18 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     def mse_loss(self, pred, target, use_entropy=False, alphas=None, epoch=None):
         
-        # loss = F.mse_loss(pred, target, reduction="mean")
+        loss = F.mse_loss(pred, target, reduction="mean")
         
-        # if epoch % 50 == 0:
-        #     print(
-        #         f"[Epoch {epoch}] "
-        #         f"MSE: {loss.item():.4f} | "
-        #         f"T: {self.get_temperature():.2f} | "
-        #         f"Eff_k: {self.effective_k(alphas):.2f}"
-        #     )
-        error = torch.abs(pred - target) / torch.max(target)
-        loss = torch.mean(error)
+        # if alphas is not None:
+        #     if epoch % 50 == 0:
+        #         print(
+        #             f"[Epoch {epoch}] "
+        #             f"MSE: {loss.item():.4f} | "
+        #             f"T: {self.get_temperature():.2f} | "
+        #             f"Eff_k: {self.effective_k(alphas):.2f}"
+        #         )
+        # error = torch.abs(pred - target) / torch.max(target)
+        # loss = torch.mean(error)
         
         return loss
     

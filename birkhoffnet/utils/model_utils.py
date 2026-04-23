@@ -51,8 +51,8 @@ class ModelFactory:
         alpha_layer = AlphaPermutationLayer(
             perm_vectors,
             AlphaMLP(encoder.output_dim, config.model.k),
-            config.training.epochs_siamese,
-            config.training.entropy_weight,
+            min_temp=0.8,
+            max_temp=5.0
         ).to(config.device)
 
         alpha_tracker = AlphaTracker(

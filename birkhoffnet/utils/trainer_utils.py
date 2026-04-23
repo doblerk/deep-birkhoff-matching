@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from time import time
 from birkhoffnet.utils.config import Config
 from birkhoffnet.losses.triplet_loss import TripletLoss
-import matplotlib.pyplot as plt
+
 
 # =========================================================
 # Triplet Trainer
@@ -129,18 +129,33 @@ class SiameseTrainer:
         self.criterion = criterion
         self.config = config
 
-        self.optimizer = torch.optim.AdamW(
-            list(alpha_layer.parameters())
-            + list(cost_builder.parameters())
-            + list(criterion.parameters()),
-            lr=config.training.lr_siamese,
-            weight_decay=config.training.weight_decay,
+        # self.optimizer = torch.optim.AdamW(
+        #     list(alpha_layer.parameters())
+        #     + list(cost_builder.parameters())
+        #     + list(criterion.parameters()),
+        #     lr=config.training.lr_siamese,
+        #     weight_decay=config.training.weight_decay,
+        # )
+
+        self.optimizer = torch.optim.AdamW([
+            {"params": alpha_layer.model.parameters(), "lr": config.training.lr_siamese},
+            {"params": cost_builder.parameters(), "lr": config.training.lr_siamese},
+        ], weight_decay=config.training.weight_decay)
+
+        self.temp_optimizer = torch.optim.AdamW(
+            [alpha_layer.log_temperature],
+            lr=1e-2
         )
 
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=config.training.epochs_siamese,
-            eta_min=1e-4
+            eta_min=5e-4
+        )
+
+        self.temp_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+            self.temp_optimizer,
+            gamma=0.995
         )
 
         self.node_cache, self.mask_cache, self.graph_cache = self._precompute_embeddings(graph_loader)
@@ -154,7 +169,7 @@ class SiameseTrainer:
         for epoch in range(self.config.training.epochs_siamese):
 
             self._train_one_epoch(train_loader, epoch)
-
+            
             if epoch % 100 == 0:
                 val_loss = self.evaluate(val_loader)
                 print(
@@ -164,13 +179,13 @@ class SiameseTrainer:
                     f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
-        # test_loss = self.evaluate(test_loader)
-        # print(
-        #     f"[GED] Final Test MSE: {test_loss:.6f} "
-        #     f"- RMSE: {np.sqrt(test_loss):.6f}"
-        # )
+        test_loss = self.evaluate(test_loader)
+        print(
+            f"[GED] Final Test MSE: {test_loss:.6f} "
+            f"- RMSE: {np.sqrt(test_loss):.6f}"
+        )
 
-        # self._save_checkpoint()
+        self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -179,7 +194,7 @@ class SiameseTrainer:
     def _train_one_epoch(self, loader, epoch):
 
         self.alpha_layer.train()
-        self.criterion.train()
+        # self.criterion.train()
 
         for batch1, batch2, ged_labels in loader:
 
@@ -203,6 +218,7 @@ class SiameseTrainer:
             normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
             self.optimizer.zero_grad()
+            self.temp_optimizer.zero_grad()
 
             cost_matrices, mask1, mask2 = self.cost_builder(
                 node_repr_b1, mask1,
@@ -234,8 +250,10 @@ class SiameseTrainer:
 
             loss.backward()
             self.optimizer.step()
+            self.temp_optimizer.step()
         
         self.scheduler.step()
+        self.temp_scheduler.step()
 
         # ----------------------------------
         # Genetic permutation evolution
@@ -272,7 +290,7 @@ class SiameseTrainer:
 
         self.alpha_layer.eval()
         self.cost_builder.eval()
-        self.criterion.eval()
+        # self.criterion.eval()
 
         total_loss = 0
         total_samples = 0
@@ -337,7 +355,7 @@ class SiameseTrainer:
 
         self.alpha_layer.eval()
         self.cost_builder.eval()
-        self.criterion.eval()
+        # self.criterion.eval()
 
         distance_matrix = torch.zeros((num_graphs, num_graphs), dtype=torch.float32, device=self.config.device)
         
@@ -445,7 +463,7 @@ class SiameseTrainer:
         torch.save({
             "alpha_layer": self.alpha_layer.state_dict(),
             "cost_builder": self.cost_builder.state_dict(),
-            "criterion": self.criterion.state_dict(),
+            #"criterion": self.criterion.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict()
         }, f'{self.config.output_dir}/ckpt_ged.pth')
