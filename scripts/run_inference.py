@@ -161,7 +161,7 @@ def main(args):
     alpha_layer = components.modules.alpha_layer
     cost_builder = components.modules.cost_builder
     
-    criterion = GEDLoss().to(config.device)
+    # criterion = GEDLoss().to(config.device)
 
     # --------------------------------------------------
     # 5. Load checkpoints
@@ -172,17 +172,17 @@ def main(args):
 
     encoder.load_state_dict(ckpt_encoder["encoder"])
 
-    ckpt_ged_path = f"{config.output_dir}/ckpt_ged_evo.pth"
+    ckpt_ged_path = f"{config.output_dir}/ckpt_ged.pth"
     ckpt_ged = torch.load(ckpt_ged_path, map_location=device)
 
     alpha_layer.load_state_dict(ckpt_ged["alpha_layer"])
     cost_builder.load_state_dict(ckpt_ged["cost_builder"])
-    criterion.load_state_dict(ckpt_ged["criterion"])
+    # criterion.load_state_dict(ckpt_ged["criterion"])
 
     encoder.eval()
     alpha_layer.eval()
     cost_builder.eval()
-    criterion.eval()
+    # criterion.eval()
 
     # --------------------------------------------------
     # 6. Initialize data loader
@@ -214,16 +214,6 @@ def main(args):
     # 7. Infer all graph pairs
     # --------------------------------------------------
 
-    # distances = infer_ged(
-    #     siamese_all_loader, 
-    #     encoder, 
-    #     alpha_layer,
-    #     cost_builder,
-    #     criterion,
-    #     device,
-    #     len(valid_indices)
-    # )
-
     siamese_trainer = SiameseTrainer(
         encoder,
         components.modules.alpha_layer,
@@ -240,9 +230,9 @@ def main(args):
         len(dataset)
     )
 
-    # output_file = Path(config.output_dir) / "distances_evo.npy"
-    # with open(output_file, 'wb') as file:
-    #     np.save(file, distances)
+    output_file = Path(config.output_dir) / "distances.npy"
+    with open(output_file, 'wb') as file:
+        np.save(file, distances)
 
 
 if __name__ == '__main__':

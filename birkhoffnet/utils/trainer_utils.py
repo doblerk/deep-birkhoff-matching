@@ -176,7 +176,7 @@ class SiameseTrainer:
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
                     f"- Val MSE: {val_loss:.4f} "
                     f"- RMSE: {np.sqrt(val_loss):.4f} "
-                    f"- Scale: {self.criterion.scale.item():.4f}"
+                    # f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
         test_loss = self.evaluate(test_loader)
