@@ -1,4 +1,6 @@
+import logging
 import argparse
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -23,6 +25,19 @@ def main(args):
     config, _, ged_data, valid_idx, train_idx, val_idx, test_idx = load_data(args.params)
 
     device = torch.device(config.device)
+
+    output_dir = Path(config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_file = output_dir / "log_training.txt"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="a"),
+            logging.StreamHandler()
+        ]
+    )
 
     # --------------------------------------------------
     # 1. Load base dataset

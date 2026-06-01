@@ -148,51 +148,51 @@ class CostMatrixBuilder(nn.Module):
         #     C = subs
 
         # Indel cost model
-        counts1 = mask1.sum(dim=1)
-        counts2 = mask2.sum(dim=1)
+        # counts1 = mask1.sum(dim=1)
+        # counts2 = mask2.sum(dim=1)
 
-        # Add learnable epsilon rows for insertion
-        # eps_mat = torch.zeros_like(C)
+        # # Add learnable epsilon rows for insertion
+        # # eps_mat = torch.zeros_like(C)
 
-        valid_mask = mask1.unsqueeze(2) & mask2.unsqueeze(1)
+        # valid_mask = mask1.unsqueeze(2) & mask2.unsqueeze(1)
 
-        # mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
-        valid_counts = valid_mask.sum(dim=(1,2)).clamp(min=1)   # (B,)
+        # # mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
+        # valid_counts = valid_mask.sum(dim=(1,2)).clamp(min=1)   # (B,)
 
-        # mean substitution cost per graph
-        mean_sub_cost = (subs * valid_mask).sum(dim=(1,2)) / valid_counts  # (B,)
+        # # mean substitution cost per graph
+        # mean_sub_cost = (subs * valid_mask).sum(dim=(1,2)) / valid_counts  # (B,)
 
-        # scale learnable eps with graph statistics
-        # learn scalar epsilon and scale it based on graph pair statistics
-        # eps_rows = F.softplus(self.eps_rows) #* mean_sub_cost.detach()
-        eps = F.softplus(self.eps)
+        # # scale learnable eps with graph statistics
+        # # learn scalar epsilon and scale it based on graph pair statistics
+        # # eps_rows = F.softplus(self.eps_rows) #* mean_sub_cost.detach()
+        # eps = F.softplus(self.eps)
 
-        # eps_rows = eps_rows.unsqueeze(0)
+        # # eps_rows = eps_rows.unsqueeze(0)
 
-        # mean_sub_cost = mean_sub_cost.unsqueeze(1)
+        # # mean_sub_cost = mean_sub_cost.unsqueeze(1)
 
-        # eps_rows_scaled = eps_rows * mean_sub_cost
-        eps_scaled = eps * mean_sub_cost.detach()
+        # # eps_rows_scaled = eps_rows * mean_sub_cost
+        # eps_scaled = eps * mean_sub_cost.detach()
 
-        row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
+        # row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
 
-        eps_row_mask_per_graph = (
-            (row_idx >= counts1.unsqueeze(1)) &
-            (row_idx < counts2.unsqueeze(1))
-        )
+        # eps_row_mask_per_graph = (
+        #     (row_idx >= counts1.unsqueeze(1)) &
+        #     (row_idx < counts2.unsqueeze(1))
+        # )
 
-        eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
+        # eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
 
-        # eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
-        # eps_values = eps_rows_scaled.unsqueeze(2)
-        # eps_values = eps_values.expand(B, -1, N_max)
-        # eps_values = eps_values.expand(-1, -1, N_max)
-        # broadcast scalar per graph
-        eps_values = eps_scaled.view(B, 1, 1).expand(-1, N_max, N_max)
+        # # eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
+        # # eps_values = eps_rows_scaled.unsqueeze(2)
+        # # eps_values = eps_values.expand(B, -1, N_max)
+        # # eps_values = eps_values.expand(-1, -1, N_max)
+        # # broadcast scalar per graph
+        # eps_values = eps_scaled.view(B, 1, 1).expand(-1, N_max, N_max)
 
-        C = torch.where(eps_row_mask, eps_values, C)
+        # C = torch.where(eps_row_mask, eps_values, C)
 
-        updated_mask1 = mask1 | eps_row_mask_per_graph
+        # updated_mask1 = mask1 | eps_row_mask_per_graph
 
         return C, updated_mask1, mask2
 

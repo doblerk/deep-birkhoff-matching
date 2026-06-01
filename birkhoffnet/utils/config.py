@@ -91,7 +91,7 @@ def load_data(path: str) -> Config:
         raise FileNotFoundError(ged_path)
 
     metadata = load_json(metadata_path)
-    ged_data = torch.load(ged_path)
+    ged_data = torch.load(ged_path, weights_only=False)
 
     valid_idx = np.load(metadata_dir / f"{config.dataset}_valid_idx.npy")
     train_idx = np.load(metadata_dir / f"{config.dataset}_train_idx.npy")

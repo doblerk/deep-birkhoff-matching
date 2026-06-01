@@ -1,4 +1,5 @@
 import math
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -123,7 +124,7 @@ class AlphaPermutationLayer(nn.Module):
         self.model = model
 
         # Learnable temperature
-        self.log_temperature = nn.Parameter(torch.tensor(0.0))
+        self.log_temperature = nn.Parameter(torch.tensor(1.0))
         self.min_temp = min_temp
         self.max_temp = max_temp
     
@@ -151,7 +152,7 @@ class AlphaPermutationLayer(nn.Module):
     # Regularization
     # --------------------------------------------------
     def get_entropy(self, alphas: torch.Tensor) -> torch.Tensor:
-        entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=-1)
+        entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=1)
         return entropy.mean() / math.log(self.k)
 
     def get_kl_to_uniform(self, logits: torch.Tensor) -> torch.Tensor:
@@ -171,14 +172,14 @@ class AlphaPermutationLayer(nn.Module):
         
         loss = F.mse_loss(pred, target, reduction="mean")
         
-        # if alphas is not None:
-        #     if epoch % 50 == 0:
-        #         print(
-        #             f"[Epoch {epoch}] "
-        #             f"MSE: {loss.item():.4f} | "
-        #             f"T: {self.get_temperature():.2f} | "
-        #             f"Eff_k: {self.effective_k(alphas):.2f}"
-        #         )
+        if alphas is not None:
+            if epoch % 25 == 0:
+                logging.info(
+                    f"[Epoch {epoch}] "
+                    f"MSE: {loss.item():.4f} | "
+                    f"T: {self.get_temperature():.2f} | "
+                    f"Eff_k: {self.effective_k(alphas):.2f}"
+                )
         # error = torch.abs(pred - target) / torch.max(target)
         # loss = torch.mean(error)
         

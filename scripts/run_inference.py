@@ -1,3 +1,4 @@
+import logging
 import argparse
 
 import torch
@@ -81,7 +82,7 @@ def infer_ged(loader, encoder, alpha_layer, cost_builder, criterion, device, num
     
     t1 = time()
     runtime = t1 - t0
-    print('Runtime: ', runtime)
+    logging.info(f'Runtime: {runtime:.4f}')
 
     distance_matrix = torch.maximum(distance_matrix, distance_matrix.T)
 
@@ -116,6 +117,16 @@ def main(args):
 
     if not hasattr(dataset_full[0], 'x') or dataset_full[0].x is None:
         dataset_full.transform = Constant(value=1.0)
+
+    log_file = Path(config.output_dir) / "log_inference.txt"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="a"),
+            logging.StreamHandler()
+        ]
+    )
 
     # --------------------------------------------------
     # 2. Metadata filtering
@@ -161,7 +172,7 @@ def main(args):
     alpha_layer = components.modules.alpha_layer
     cost_builder = components.modules.cost_builder
     
-    # criterion = GEDLoss().to(config.device)
+    criterion = GEDLoss().to(config.device)
 
     # --------------------------------------------------
     # 5. Load checkpoints
@@ -177,12 +188,12 @@ def main(args):
 
     alpha_layer.load_state_dict(ckpt_ged["alpha_layer"])
     cost_builder.load_state_dict(ckpt_ged["cost_builder"])
-    # criterion.load_state_dict(ckpt_ged["criterion"])
+    criterion.load_state_dict(ckpt_ged["criterion"])
 
     encoder.eval()
     alpha_layer.eval()
     cost_builder.eval()
-    # criterion.eval()
+    criterion.eval()
 
     # --------------------------------------------------
     # 6. Initialize data loader

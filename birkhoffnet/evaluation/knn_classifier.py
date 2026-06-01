@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 
 from sklearn.model_selection import StratifiedShuffleSplit, StratifiedKFold, cross_val_score
@@ -75,8 +76,8 @@ def knn_classifier(config, distances, valid_indices, n_repeat=5, test_size=0.2):
         all_test_acc.append(acc)
         all_test_f1.append(f1)
 
-        print(f"[Run {split_id+1}] best_k={best_k}, CV={best_score:.4f}, Test Acc={acc:.4f}, Test F1={f1:.4f}")
+        logging.info(f"[Run {split_id+1}] best_k={best_k}, CV={best_score:.4f}, Test Acc={acc:.4f}, Test F1={f1:.4f}")
     
-    print(f"Final results over {n_repeat} random splits:")
-    print(f"Acc mean +/- std: {np.mean(all_test_acc):.4f} +/- {np.std(all_test_acc):.4f}")
-    print(f"F1 mean +/- std: {np.mean(all_test_f1):.4f} +/- {np.std(all_test_f1):.4f}")
+    logging.info(f"Final results over {n_repeat} random splits:")
+    logging.info(f"Acc mean +/- std: {np.mean(all_test_acc):.4f} +/- {np.std(all_test_acc):.4f}")
+    logging.info(f"F1 mean +/- std: {np.mean(all_test_f1):.4f} +/- {np.std(all_test_f1):.4f}")

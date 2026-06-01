@@ -1,3 +1,4 @@
+import logging
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -76,9 +77,10 @@ class TripletTrainer:
             if epoch % 1 == 0:
                 avg_loss = total_loss / total_samples
                 
-                print(f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
-                      f"- Loss: {avg_loss:.4f} "
-                      f"- gap: {avg_epoch_gap:.4f}"
+                logging.info(
+                    f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
+                    f"- Loss: {avg_loss:.4f} "
+                    f"- gap: {avg_epoch_gap:.4f}"
                 )
 
             if avg_epoch_gap > best_gap + tol:
@@ -90,7 +92,7 @@ class TripletTrainer:
             
             if patience_counter >= patience:
                 best_epoch = epoch - patience_counter
-                print(f"Early stopping at epoch {epoch+1}, best gap={best_gap:.4f} achieved at epoch {best_epoch+1}")
+                logging.info(f"Early stopping at epoch {epoch+1}, best gap={best_gap:.4f} achieved at epoch {best_epoch+1}")
                 break
 
         return self.encoder
@@ -140,6 +142,7 @@ class SiameseTrainer:
         self.optimizer = torch.optim.AdamW([
             {"params": alpha_layer.model.parameters(), "lr": config.training.lr_siamese},
             {"params": cost_builder.parameters(), "lr": config.training.lr_siamese},
+            {"params": criterion.parameters(), "lr": config.training.lr_siamese}
         ], weight_decay=config.training.weight_decay)
 
         self.temp_optimizer = torch.optim.AdamW(
@@ -172,15 +175,15 @@ class SiameseTrainer:
             
             if epoch % 100 == 0:
                 val_loss = self.evaluate(val_loader)
-                print(
+                logging.info(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
                     f"- Val MSE: {val_loss:.4f} "
                     f"- RMSE: {np.sqrt(val_loss):.4f} "
-                    # f"- Scale: {self.criterion.scale.item():.4f}"
+                    f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
         test_loss = self.evaluate(test_loader)
-        print(
+        logging.info(
             f"[GED] Final Test MSE: {test_loss:.6f} "
             f"- RMSE: {np.sqrt(test_loss):.6f}"
         )
@@ -194,7 +197,7 @@ class SiameseTrainer:
     def _train_one_epoch(self, loader, epoch):
 
         self.alpha_layer.train()
-        # self.criterion.train()
+        self.criterion.train()
 
         for batch1, batch2, ged_labels in loader:
 
@@ -290,7 +293,7 @@ class SiameseTrainer:
 
         self.alpha_layer.eval()
         self.cost_builder.eval()
-        # self.criterion.eval()
+        self.criterion.eval()
 
         total_loss = 0
         total_samples = 0
@@ -355,7 +358,7 @@ class SiameseTrainer:
 
         self.alpha_layer.eval()
         self.cost_builder.eval()
-        # self.criterion.eval()
+        self.criterion.eval()
 
         distance_matrix = torch.zeros((num_graphs, num_graphs), dtype=torch.float32, device=self.config.device)
         
@@ -394,7 +397,7 @@ class SiameseTrainer:
         
         t1 = time()
         runtime = t1 - t0
-        print('Runtime: ', runtime)
+        logging.info(f'Runtime: {runtime:.4f}')
 
         return distance_matrix.to(torch.int32).cpu().numpy()
     
@@ -463,7 +466,7 @@ class SiameseTrainer:
         torch.save({
             "alpha_layer": self.alpha_layer.state_dict(),
             "cost_builder": self.cost_builder.state_dict(),
-            #"criterion": self.criterion.state_dict(),
+            "criterion": self.criterion.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict()
         }, f'{self.config.output_dir}/ckpt_ged.pth')

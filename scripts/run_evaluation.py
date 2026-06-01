@@ -1,6 +1,7 @@
+import logging
 import argparse
+from pathlib import Path
 
-# import torch
 import numpy as np
 
 from birkhoffnet.utils.config import load_data
@@ -10,14 +11,25 @@ from birkhoffnet.evaluation.knn_classifier import knn_classifier
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str, help='Path to parameters file')
-    parser.add_argument('--distances', type=str, help='Path to ged file')
     return parser
 
 
 def main(args):
 
     config, _, _, valid_indices, _, _, _ = load_data(args.params)
-    distances = np.load(args.distances)
+
+    log_file = Path(config.output_dir) / "log_evaluation.txt"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="a"),
+            logging.StreamHandler()
+        ]
+    )
+
+    distances_file = config.output_dir / "distances.npy"
+    distances = np.load(distances_file)
 
     knn_classifier(config, distances, valid_indices)
 
