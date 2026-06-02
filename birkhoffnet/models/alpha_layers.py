@@ -17,12 +17,12 @@ class AlphaMLP(nn.Module):
             nn.Linear(input_dim * 2, input_dim * 4),
             nn.ReLU(inplace=True),
             nn.LayerNorm(input_dim * 4),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             
             nn.Linear(input_dim * 4, input_dim * 4),
             nn.GELU(),
             nn.LayerNorm(input_dim * 4),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
 
             nn.Linear(input_dim * 4, k)
         )
@@ -124,7 +124,7 @@ class AlphaPermutationLayer(nn.Module):
         self.model = model
 
         # Learnable temperature
-        self.log_temperature = nn.Parameter(torch.tensor(1.0))
+        self.log_temperature = nn.Parameter(torch.tensor(0.0))
         self.min_temp = min_temp
         self.max_temp = max_temp
     
@@ -139,8 +139,8 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
 
-        logits = logits - logits.mean(dim=1, keepdim=True)
-        logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
+        # logits = logits - logits.mean(dim=1, keepdim=True)
+        # logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
         
         T = self.get_temperature()
         
@@ -170,16 +170,42 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     def mse_loss(self, pred, target, use_entropy=False, alphas=None, epoch=None):
         
-        loss = F.mse_loss(pred, target, reduction="mean")
+        mse = F.mse_loss(pred, target, reduction="mean")
+
+        loss = mse
         
+        if use_entropy and alphas is not None:
+
+            entropy = -(alphas * torch.log(alphas + 1e-8)).sum(dim=-1).mean()
+
+            lambda_entropy = 1e-2
+
+            loss = loss - lambda_entropy * entropy
+
         if alphas is not None:
-            if epoch % 25 == 0:
+            if epoch % 1 == 0:
+                entropy_val = (
+                    -(alphas * torch.log(alphas + 1e-8))
+                    .sum(dim=-1)
+                    .mean()
+                    .item()
+                )
+
                 logging.info(
                     f"[Epoch {epoch}] "
-                    f"MSE: {loss.item():.4f} | "
+                    f"MSE: {mse.item():.4f} | "
+                    f"Entropy: {entropy_val:.3f} | "
                     f"T: {self.get_temperature():.2f} | "
                     f"Eff_k: {self.effective_k(alphas):.2f}"
                 )
+
+            # if epoch % 1 == 0:
+            #     logging.info(
+            #         f"[Epoch {epoch}] "
+            #         f"MSE: {loss.item():.4f} | "
+            #         f"T: {self.get_temperature():.2f} | "
+            #         f"Eff_k: {self.effective_k(alphas):.2f}"
+                # )
         # error = torch.abs(pred - target) / torch.max(target)
         # loss = torch.mean(error)
         

@@ -18,7 +18,9 @@ def main(args):
 
     config, _, _, valid_indices, _, _, _ = load_data(args.params)
 
-    log_file = Path(config.output_dir) / "log_evaluation.txt"
+    output_dir = Path(config.output_dir)
+
+    log_file = output_dir / "log_evaluation.txt"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
@@ -28,7 +30,7 @@ def main(args):
         ]
     )
 
-    distances_file = config.output_dir / "distances.npy"
+    distances_file = output_dir / "distances.npy"
     distances = np.load(distances_file)
 
     knn_classifier(config, distances, valid_indices)

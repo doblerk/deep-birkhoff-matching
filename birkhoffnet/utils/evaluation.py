@@ -34,6 +34,19 @@ from birkhoffnet.utils.model_utils import ModelFactory
 from birkhoffnet.utils.config import load_data
 
 
+
+class GraphDataset(Dataset):
+    def __init__(self, graphs):
+        self.graphs = graphs
+    
+    def __len__(self):
+        return len(self.graphs)
+
+    def __getitem__(self, idx):
+        g = self.graphs[idx]
+        g.graph_id = idx
+        return g
+
 class CustomGraphPairDataset(Dataset):
     def __init__(self, base_graph, other_graphs, norm_ged_matrix, base_idx, other_indices):
         self.base_graph = base_graph
@@ -344,7 +357,8 @@ def get_args_parser():
 
 def main(args):
 
-    config, metadata, ged_data = load_data(args.params)
+    # config, metadata, ged_data = load_data(args.params)
+    config, metadata, ged_data, valid_idx, _, _, _ = load_data(args.params)
 
     device = torch.device(config.device)
 
@@ -362,7 +376,7 @@ def main(args):
     # 2. Metadata filtering
     # --------------------------------------------------
 
-    valid_indices = metadata["valid_graph_indices"]
+    valid_indices = valid_idx.tolist()
 
     dataset = [dataset_full[i] for i in valid_indices]
 
@@ -387,7 +401,7 @@ def main(args):
 
     # num_features = filtered_dataset[0].num_node_features
 
-        # --------------------------------------------------
+    # --------------------------------------------------
     # 5. Initialize models
     # --------------------------------------------------
 
@@ -428,7 +442,8 @@ def main(args):
     # 7. Select graphs
     # --------------------------------------------------
 
-    indices = [1, 4, 8, 2, 0, 3]
+    # indices = [1, 4, 8, 2, 0, 3]
+    indices = [2, 2, 4, 6, 7, 9]
 
     print(
         norm_ged_matrix[1, 4].item(),
@@ -443,6 +458,8 @@ def main(args):
     G0 = selected_graphs[0]
     others = selected_graphs[1:]
 
+    graph_dataset = GraphDataset(selected_graphs)
+
     data = CustomGraphPairDataset(
         G0,
         others,
@@ -450,6 +467,8 @@ def main(args):
         indices[0],
         indices[1:]
     )
+
+    graph_loader = DataLoader(graph_dataset, batch_size=len(dataset), shuffle=False)
 
     loader = DataLoader(
         data,
@@ -467,50 +486,84 @@ def main(args):
 
     with torch.no_grad():
 
+        all_node = []
+        all_graph = []
+
+        max_nodes = int(metadata["node_stats"]["upper_bound"])
+        node_dim = None
+
+        for batch in graph_loader:
+
+            batch = batch.to(device)
+
+            node_repr, graph_repr = encoder(
+                batch.x, batch.edge_index, batch.batch
+            )
+
+            node_splits = batch.batch.bincount().tolist()
+            node_split = torch.split(node_repr, node_splits)
+
+            for i, gid in enumerate(batch.graph_id.tolist()):
+                n = node_split[i].detach().cpu()
+
+                # max_nodes = max(max_nodes, n.size(0))
+                node_dim = n.size(1)
+
+                all_node.append((gid, n))
+                all_graph.append((gid, graph_repr[i].detach().cpu()))
+
+        num_graphs = max(g for g, _ in all_node) + 1
+
+        node_cache = torch.zeros((num_graphs, max_nodes, node_dim), device=device)
+        mask_cache = torch.zeros((num_graphs, max_nodes), dtype=torch.bool, device=device)
+        graph_cache = torch.zeros((num_graphs, graph_repr.size(1)), device=device)
+
+        for (gid, n) in all_node:
+            node_cache[gid, :n.size(0)] = n
+            mask_cache[gid, :n.size(0)] = True
+
+        for (gid, g) in all_graph:
+            graph_cache[gid] = g
+
         for batch in loader:
 
-            batch1, batch2, _ = batch
-            batch1, batch2 = batch1.to(device), batch2.to(device)
+            batch1, batch2, ged = batch
+            batch1, batch2, ged = batch1.to(device), batch2.to(device), ged.to(device)
+
+            idx1, idx2 = batch1.graph_id, batch2.graph_id
+
+            node_repr_b1 = node_cache[idx1]
+            mask1 = mask_cache[idx1]
+            graph_repr_b1 = graph_cache[idx1]
+
+            node_repr_b2 = node_cache[idx2]
+            mask2 = mask_cache[idx2]
+            graph_repr_b2 = graph_cache[idx2]
 
             n_nodes_1 = batch1.batch.bincount()
             n_nodes_2 = batch2.batch.bincount()
 
             normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
-            node_repr_b1, graph_repr_b1 = encoder(
-                batch1.x,
-                batch1.edge_index,
-                batch1.batch
-            )
-
-            node_repr_b2, graph_repr_b2 = encoder(
-                batch2.x,
-                batch2.edge_index,
-                batch2.batch
-            )
-
             cost_matrices, masks1, masks2 = cost_builder(
-                node_repr_b1,
-                graph_repr_b1,
-                batch1.batch,
-                node_repr_b2,
-                graph_repr_b2,
-                batch2.batch
+                node_repr_b1, mask1,
+                node_repr_b2, mask2
             )
 
             soft_assignments, alphas = alpha_layer(
-                graph_repr_b1,
-                graph_repr_b2
+                graph_repr_b1, graph_repr_b2
             )
+            print(alphas)
 
             assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
+
             soft_assignments = soft_assignments * assignment_masks
 
             row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
             soft_assignments = soft_assignments / row_sums
 
-            col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
-            soft_assignments = soft_assignments / col_sums
+            # col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+            # soft_assignments = soft_assignments / col_sums
 
             predicted_ged = criterion(cost_matrices, soft_assignments)
 

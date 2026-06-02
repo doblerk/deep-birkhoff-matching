@@ -30,7 +30,7 @@ class TripletTrainer:
 
         best_gap = -float('inf')
         patience_counter = 0
-        patience = 20
+        patience = 30
         tol = 1e-4
 
         for epoch in range(self.config.training.epochs_triplet):
@@ -59,7 +59,17 @@ class TripletTrainer:
                 d_ap = torch.norm(a_emb - p_emb, dim=1)
                 d_an = torch.norm(a_emb - n_emb, dim=1)
                 total_gap += (d_an - d_ap).sum().item()
+                with torch.no_grad():
+                    # active = (d_ap - d_an + self.config.training.triplet_margin > 0).float().mean()
+                    active = (d_ap - d_an + self.config.training.triplet_margin > 0).float().mean()
                 # ------------------------------------
+
+                logging.info(
+                    f"d_ap={d_ap.mean():.3f} "
+                    f"d_an={d_an.mean():.3f} "
+                    f"gap={(d_an-d_ap).mean():.3f} "
+                    f"active={active:.3f}"
+                )
 
                 loss = self.criterion(a_emb, p_emb, n_emb)
 
@@ -169,12 +179,20 @@ class SiameseTrainer:
 
     def train(self, train_loader, val_loader, test_loader):
 
+        best_val_loss = float("inf")
+        best_epoch = 0
+        patience_counter = 0
+        patience = 20
+        tol = 1e-5
+
         for epoch in range(self.config.training.epochs_siamese):
 
             self._train_one_epoch(train_loader, epoch)
             
-            if epoch % 100 == 0:
+            if epoch % 1 == 0:
+
                 val_loss = self.evaluate(val_loader)
+                
                 logging.info(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
                     f"- Val MSE: {val_loss:.4f} "
@@ -182,13 +200,34 @@ class SiameseTrainer:
                     f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
+                # Improvement = LOWER loss
+                if val_loss < best_val_loss - tol:
+                    best_val_loss = val_loss
+                    best_epoch = epoch
+                    patience_counter = 0
+                    self._save_checkpoint()
+                else:
+                    patience_counter += 1
+
+                if patience_counter >= patience:
+                    logging.info(
+                        f"Early stopping triggered at epoch {epoch+1}. "
+                        f"Best epoch was {best_epoch+1} "
+                        f"with val MSE={best_val_loss:.6f}"
+                    )
+                    break
+                    
+        # Restore best checkpoint before testing
+        self._load_checkpoint()
+
         test_loss = self.evaluate(test_loader)
+        
         logging.info(
             f"[GED] Final Test MSE: {test_loss:.6f} "
             f"- RMSE: {np.sqrt(test_loss):.6f}"
         )
 
-        self._save_checkpoint()
+        # self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -468,5 +507,18 @@ class SiameseTrainer:
             "cost_builder": self.cost_builder.state_dict(),
             "criterion": self.criterion.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "scheduler": self.scheduler.state_dict()
+            "scheduler": self.scheduler.state_dict(),
+            "temp_optimizer": self.temp_optimizer.state_dict(),
+            "temp_scheduler": self.temp_scheduler.state_dict()
         }, f'{self.config.output_dir}/ckpt_ged.pth')
+    
+    def _load_checkpoint(self):
+        checkpoint = torch.load(
+            f"{self.config.output_dir}/ckpt_ged.pth",
+            map_location=self.config.device
+        )
+        self.alpha_layer.load_state_dict(checkpoint["alpha_layer"])
+        self.cost_builder.load_state_dict(checkpoint["cost_builder"])
+        self.criterion.load_state_dict(checkpoint["criterion"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.scheduler.load_state_dict(checkpoint["scheduler"])

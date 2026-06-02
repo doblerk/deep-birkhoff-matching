@@ -63,12 +63,21 @@ class TripletDataset(Dataset):
 
         neighbors = self.sorted_neighbors[anchor_idx]
 
+        pos_low  = int(0.02 * N)
+        pos_high = int(0.10 * N)
+
+        neg_low  = int(0.15 * N)
+        neg_high = int(0.40 * N)
+
         # Hard positive = sample one of the top-k closest
-        pos_candidates = neighbors[:self.k_pos]
-        pos_graph_idx = random.choice(pos_candidates)
+        # pos_candidates = neighbors[:self.k_pos]
+        pos_candidates = neighbors[20:60]
 
         # Hard negative: sample one of the bottom-k farthest
-        neg_candidates = neighbors[-self.k_neg:]
+        # neg_candidates = neighbors[-self.k_neg:]
+        neg_candidates = neighbors[100:250]
+
+        pos_graph_idx = random.choice(pos_candidates)
         neg_graph_idx = random.choice(neg_candidates)
 
         # pos_graph = self.graphs[pos_graph_idx]

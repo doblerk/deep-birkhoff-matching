@@ -58,7 +58,7 @@ class SiameseDataset(Dataset):
         if self.pair_mode == 'train':
             idx1 = self.train_indices[idx]
 
-            if random.random() < 0.2:
+            if random.random() < 0.1:
                 idx2 = idx1
                 # g1 = self.graphs[idx1].clone()
                 # g2 = g1.clone()
