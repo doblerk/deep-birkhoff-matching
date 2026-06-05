@@ -27,6 +27,10 @@ class TripletDataset(Dataset):
         #     for i in self.indices
         # }
 
+        self.num_graphs = len(graphs)
+        self.pos_ranges = (0.02, 0.10)
+        self.neg_ranges = (0.10, 0.40)
+
         # Precompute sorted neighbors by GED
         self.sorted_neighbors = self._compute_sorted_neighbors()
     
@@ -59,29 +63,30 @@ class TripletDataset(Dataset):
   
     def __getitem__(self, idx):
         anchor_idx = self.indices[idx]
-        # anchor_graph = self.graphs[anchor_idx]
 
         neighbors = self.sorted_neighbors[anchor_idx]
 
-        pos_low  = int(0.02 * N)
-        pos_high = int(0.10 * N)
+        pos_low  = int(self.pos_ranges[0] * self.num_graphs)
+        pos_high = int(self.pos_ranges[1] * self.num_graphs)
 
-        neg_low  = int(0.15 * N)
-        neg_high = int(0.40 * N)
+        neg_low  = int(self.neg_ranges[0] * self.num_graphs)
+        neg_high = int(self.neg_ranges[1] * self.num_graphs)
 
         # Hard positive = sample one of the top-k closest
         # pos_candidates = neighbors[:self.k_pos]
-        pos_candidates = neighbors[20:60]
 
         # Hard negative: sample one of the bottom-k farthest
         # neg_candidates = neighbors[-self.k_neg:]
-        neg_candidates = neighbors[100:250]
+
+        pos_candidates = neighbors[pos_low:pos_high]
+        neg_candidates = neighbors[neg_low:neg_high]
 
         pos_graph_idx = random.choice(pos_candidates)
         neg_graph_idx = random.choice(neg_candidates)
 
         # pos_graph = self.graphs[pos_graph_idx]
         # neg_graph = self.graphs[neg_graph_idx]
+
         anchor_graph = self.graphs[anchor_idx].clone()
         pos_graph = self.graphs[pos_graph_idx].clone()
         neg_graph = self.graphs[neg_graph_idx].clone()

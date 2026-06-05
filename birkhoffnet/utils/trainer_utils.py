@@ -28,7 +28,7 @@ class TripletTrainer:
 
         self.encoder.train()
 
-        best_gap = -float('inf')
+        best_loss = float('inf')
         patience_counter = 0
         patience = 30
         tol = 1e-4
@@ -37,6 +37,7 @@ class TripletTrainer:
 
             total_loss = 0
             total_gap = 0
+            total_active = 0
             total_samples = 0
 
             for anchor_graphs, pos_graphs, neg_graphs in loader:
@@ -58,17 +59,17 @@ class TripletTrainer:
                 # ------ diagnostics monitoring ------
                 d_ap = torch.norm(a_emb - p_emb, dim=1)
                 d_an = torch.norm(a_emb - n_emb, dim=1)
-                total_gap += (d_an - d_ap).sum().item()
-                with torch.no_grad():
-                    # active = (d_ap - d_an + self.config.training.triplet_margin > 0).float().mean()
-                    active = (d_ap - d_an + self.config.training.triplet_margin > 0).float().mean()
+                gap = d_an - d_ap
+                active = (d_ap - d_an + self.config.training.triplet_margin > 0).float()
+                total_gap += gap.sum().item()
+                total_active += active.sum().item()
                 # ------------------------------------
 
                 logging.info(
-                    f"d_ap={d_ap.mean():.3f} "
-                    f"d_an={d_an.mean():.3f} "
-                    f"gap={(d_an-d_ap).mean():.3f} "
-                    f"active={active:.3f}"
+                    f"d_ap={d_ap.mean().item():.4f} "
+                    f"d_an={d_an.mean().item():.4f} "
+                    f"gap={gap.mean().item():.4f} "
+                    f"active={active.mean().item():.4f}"
                 )
 
                 loss = self.criterion(a_emb, p_emb, n_emb)
@@ -82,27 +83,31 @@ class TripletTrainer:
 
             self.scheduler.step()
 
-            avg_epoch_gap = total_gap / total_samples
+            avg_loss = total_loss / total_samples
+            avg_gap = total_gap / total_samples
+            avg_active = total_active / total_samples
 
-            if epoch % 1 == 0:
-                avg_loss = total_loss / total_samples
-                
-                logging.info(
-                    f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
-                    f"- Loss: {avg_loss:.4f} "
-                    f"- gap: {avg_epoch_gap:.4f}"
-                )
+            logging.info(
+                f"[Triplet] Epoch {epoch+1}/{self.config.training.epochs_triplet}: "
+                f"Loss={avg_loss:.4f} "
+                f"Gap={avg_gap:.4f} "
+                f"Active={avg_active:.4f}"
+            )
 
-            if avg_epoch_gap > best_gap + tol:
-                best_gap = avg_epoch_gap
+            # ------ Early stopping ------
+            if avg_loss < best_loss - tol:
+                best_loss = avg_loss
+                best_epoch = epoch
                 patience_counter = 0
                 self._save_checkpoint()
             else:
                 patience_counter += 1
             
             if patience_counter >= patience:
-                best_epoch = epoch - patience_counter
-                logging.info(f"Early stopping at epoch {epoch+1}, best gap={best_gap:.4f} achieved at epoch {best_epoch+1}")
+                logging.info(
+                    f"Early stopping at epoch {epoch+1}. "
+                    f"Best loss={best_loss:.4f} at epoch {best_epoch+1}"
+                )
                 break
 
         return self.encoder
@@ -166,10 +171,10 @@ class SiameseTrainer:
             eta_min=5e-4
         )
 
-        self.temp_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-            self.temp_optimizer,
-            gamma=0.995
-        )
+        # self.temp_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        #     self.temp_optimizer,
+        #     gamma=0.995
+        # )
 
         self.node_cache, self.mask_cache, self.graph_cache = self._precompute_embeddings(graph_loader)
 
@@ -182,8 +187,8 @@ class SiameseTrainer:
         best_val_loss = float("inf")
         best_epoch = 0
         patience_counter = 0
-        patience = 20
-        tol = 1e-5
+        patience = 100
+        tol = 1e-4
 
         for epoch in range(self.config.training.epochs_siamese):
 
@@ -263,7 +268,7 @@ class SiameseTrainer:
             self.temp_optimizer.zero_grad()
 
             cost_matrices, mask1, mask2 = self.cost_builder(
-                node_repr_b1, mask1,
+                node_repr_b1, mask1, graph_repr_b1,
                 node_repr_b2, mask2
             )
 
@@ -295,7 +300,7 @@ class SiameseTrainer:
             self.temp_optimizer.step()
         
         self.scheduler.step()
-        self.temp_scheduler.step()
+        # self.temp_scheduler.step()
 
         # ----------------------------------
         # Genetic permutation evolution
@@ -359,7 +364,7 @@ class SiameseTrainer:
             normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
             cost_matrices, mask1, mask2 = self.cost_builder(
-                node_repr_b1, mask1,
+                node_repr_b1, mask1, graph_repr_b1,
                 node_repr_b2, mask2
             )
 
@@ -417,7 +422,7 @@ class SiameseTrainer:
             graph_repr_b2 = self.graph_cache[idx2]
 
             cost_matrices, mask1, mask2 = self.cost_builder(
-                node_repr_b1, mask1,
+                node_repr_b1, mask1, graph_repr_b1,
                 node_repr_b2, mask2
             )
 
@@ -509,7 +514,8 @@ class SiameseTrainer:
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict(),
             "temp_optimizer": self.temp_optimizer.state_dict(),
-            "temp_scheduler": self.temp_scheduler.state_dict()
+            # "temp_scheduler": self.temp_scheduler.state_dict(),
+            "perms": self.alpha_layer.perm_vectors
         }, f'{self.config.output_dir}/ckpt_ged.pth')
     
     def _load_checkpoint(self):

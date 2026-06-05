@@ -6,6 +6,7 @@ import numpy as np
 
 from birkhoffnet.utils.config import load_data
 from birkhoffnet.evaluation.knn_classifier import knn_classifier
+from birkhoffnet.evaluation.metrics import ranking_metrics
 
 
 def get_args_parser():
@@ -16,7 +17,7 @@ def get_args_parser():
 
 def main(args):
 
-    config, _, _, valid_indices, _, _, _ = load_data(args.params)
+    config, _, ged_data, valid_indices, _, _, test_indices = load_data(args.params)
 
     output_dir = Path(config.output_dir)
 
@@ -33,8 +34,15 @@ def main(args):
     distances_file = output_dir / "distances.npy"
     distances = np.load(distances_file)
 
-    knn_classifier(config, distances, valid_indices)
+    # true_distances = ged_data["ged_matrix"]
 
+    # valid_idx_map = {orig_idx: i for i, orig_idx in enumerate(valid_indices)}
+    # test_indices_orig  = set(test_indices.tolist())
+    # test_indices = [valid_idx_map[i] for i in test_indices_orig]
+
+    knn_classifier(config, distances, valid_indices)
+    # rho, tau, pks = ranking_metrics(distances, true_distances, test_indices)
+    # print(rho, ' ', tau, ' ', pks)
     # ged = torch.load("./res/new_analysis/data/AIDS/AIDS_ged_matrices.pt")
     # normalization_factor = ged["norm_factor_matrix"]
     # predicted_ged = -normalization_factor * torch.log(torch.tensor(distances))

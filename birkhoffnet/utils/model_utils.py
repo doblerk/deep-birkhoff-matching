@@ -52,7 +52,7 @@ class ModelFactory:
             perm_vectors,
             AlphaMLP(encoder.output_dim, config.model.k),
             min_temp=0.8,
-            max_temp=5.0
+            max_temp=3.0
         ).to(config.device)
 
         alpha_tracker = AlphaTracker(
@@ -64,7 +64,7 @@ class ModelFactory:
         cost_builder = CostMatrixBuilder(
             embedding_dim=config.model.embedding_dim,
             max_graph_size=max_graph_size,
-            use_learned_sub=False,
+            use_learned_sub=True,
             model_indel=None,
             rank=None
         ).to(config.device)

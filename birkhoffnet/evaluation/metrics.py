@@ -1,4 +1,4 @@
-import npy as np
+import numpy as np
 from scipy.stats import spearmanr, kendalltau
 
 
@@ -27,3 +27,27 @@ def compute_rank_correlations(pred_matrix, true_matrix, k=10):
     # Precision at K
     p_at_k = precision_at_k(pred_matrix, true_matrix, k)
     return spearman_rho, kendall_tau, p_at_k
+
+
+def precision_at_k(pred_scores, true_scores, k):
+    pred_topk = np.argsort(pred_scores)[:k]
+    true_topk = np.argsort(true_scores)[:k]
+
+    return len(set(pred_topk) & set(true_topk)) / k
+
+
+def ranking_metrics(pred_matrix, true_matrix, indices):
+    spearmans = []
+    kendalls = []
+    pks = []
+
+    for i in indices:
+        rho, _ = spearmanr(pred_matrix[i], true_matrix[i])
+        tau, _ = kendalltau(pred_matrix[i], true_matrix[i])
+        pk = precision_at_k(pred_matrix[i], true_matrix[i], k=10)
+
+        spearmans.append(rho)
+        kendalls.append(tau)
+        pks.append(pk)
+
+    return np.mean(spearmans), np.mean(kendalls), np.mean(pks)

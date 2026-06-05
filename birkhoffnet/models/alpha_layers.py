@@ -13,22 +13,36 @@ class AlphaMLP(nn.Module):
     def __init__(self, input_dim, k):
         super().__init__()
 
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim * 2, input_dim * 4),
-            nn.ReLU(inplace=True),
-            nn.LayerNorm(input_dim * 4),
-            nn.Dropout(0.4),
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(input_dim * 2, input_dim * 2),
+        #     nn.ReLU(inplace=True),
+        #     nn.LayerNorm(input_dim * 2),
+        #     nn.Dropout(0.2),
             
-            nn.Linear(input_dim * 4, input_dim * 4),
-            nn.GELU(),
-            nn.LayerNorm(input_dim * 4),
-            nn.Dropout(0.4),
+        #     nn.Linear(input_dim * 2, input_dim * 2),
+        #     nn.GELU(),
+        #     nn.LayerNorm(input_dim * 2),
+        #     nn.Dropout(0.2),
 
-            nn.Linear(input_dim * 4, k)
+        #     nn.Linear(input_dim * 2, k)
+        # )
+        self.mlp = nn.Sequential(
+            nn.Linear(4 * input_dim, 2 * input_dim),
+            nn.GELU(),
+            nn.LayerNorm(2 * input_dim),
+            nn.Dropout(0.2),
+            nn.Linear(2 * input_dim, k)
         )
     
     def forward(self, g1, g2):
-        pair_repr = torch.cat([g1, g2], dim=-1)
+        # pair_repr = torch.cat([g1, g2], dim=-1)
+        # return self.mlp(pair_repr)
+        pair_repr = torch.cat([
+            g1,
+            g2,
+            torch.abs(g1 - g2),
+            g1 * g2
+        ], dim=-1)
         return self.mlp(pair_repr)
 
 
@@ -139,8 +153,8 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
 
-        # logits = logits - logits.mean(dim=1, keepdim=True)
-        # logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
+        logits = logits - logits.mean(dim=1, keepdim=True)
+        logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
         
         T = self.get_temperature()
         
@@ -176,27 +190,23 @@ class AlphaPermutationLayer(nn.Module):
         
         if use_entropy and alphas is not None:
 
-            entropy = -(alphas * torch.log(alphas + 1e-8)).sum(dim=-1).mean()
+            entropy = self.get_entropy(alphas) #-(alphas * torch.log(alphas + 1e-8)).sum(dim=-1).mean()
 
-            lambda_entropy = 1e-2
+            beta = 0.02
+            bonus = beta * mse.detach() * entropy
 
-            loss = loss - lambda_entropy * entropy
+            loss = loss - bonus
 
         if alphas is not None:
             if epoch % 1 == 0:
-                entropy_val = (
-                    -(alphas * torch.log(alphas + 1e-8))
-                    .sum(dim=-1)
-                    .mean()
-                    .item()
-                )
-
+                
                 logging.info(
                     f"[Epoch {epoch}] "
-                    f"MSE: {mse.item():.4f} | "
-                    f"Entropy: {entropy_val:.3f} | "
+                    f"Train MSE: {mse.item():.4f} | "
+                    f"Entropy: {entropy.item():.3f} | "
                     f"T: {self.get_temperature():.2f} | "
-                    f"Eff_k: {self.effective_k(alphas):.2f}"
+                    f"Eff_k: {self.effective_k(alphas):.2f} "
+                    f"{bonus.item():.4f} and {bonus / mse}"
                 )
 
             # if epoch % 1 == 0:

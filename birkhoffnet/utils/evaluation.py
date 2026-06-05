@@ -546,14 +546,13 @@ def main(args):
             normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
 
             cost_matrices, masks1, masks2 = cost_builder(
-                node_repr_b1, mask1,
+                node_repr_b1, mask1, graph_repr_b1,
                 node_repr_b2, mask2
             )
 
             soft_assignments, alphas = alpha_layer(
                 graph_repr_b1, graph_repr_b2
             )
-            print(alphas)
 
             assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
 
@@ -562,8 +561,8 @@ def main(args):
             row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
             soft_assignments = soft_assignments / row_sums
 
-            # col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
-            # soft_assignments = soft_assignments / col_sums
+            col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+            soft_assignments = soft_assignments / col_sums
 
             predicted_ged = criterion(cost_matrices, soft_assignments)
 
