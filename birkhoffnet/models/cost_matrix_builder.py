@@ -6,29 +6,25 @@ from torch_geometric.utils import to_dense_batch
 
 
 class CostMatrixBuilder(nn.Module):
-    def __init__(self, embedding_dim, max_graph_size, use_learned_sub=False, model_indel=None, rank=None):
+    def __init__(self, embedding_dim, max_graph_size, use_learned_sub=False):
         super().__init__()
         self.d = embedding_dim
         self.max_graph_size = max_graph_size
         self.use_learned_sub = use_learned_sub
-        self.model_indel = model_indel
 
         if use_learned_sub:
             # single bilinear matrix W for substitution (learned similarity)
             # Use a factorization of W to ensure it is symmetric and positive semidefinite
-            r = rank or embedding_dim
+            r = embedding_dim
             self.L = nn.Parameter(torch.randn(self.d, r))
-            # self.sub_W = nn.Parameter(torch.randn(self.d, self.d))
             self.sub_bias = nn.Parameter(torch.tensor(1.0))
         else:
             self.sub_L = None
-        
-        # self.eps_rows = nn.Parameter(torch.ones(max_graph_size))
-        # self.eps = nn.Parameter(torch.tensor(1.0))
 
         self.ins_mlp = nn.Sequential(
             nn.Linear(self.d * 2, self.d),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.LayerNorm(self.d),
             nn.Linear(self.d, 1),
         )
     
@@ -81,10 +77,6 @@ class CostMatrixBuilder(nn.Module):
             # weighted h1 = H1 @ W
             weighted_h1 = torch.einsum('bnd,dk->bnk', H1, W)
             s = torch.einsum('bnk,bmk->bnm', weighted_h1, H2)
-            # s = (s - s.mean()) / (s.std() + 1e-8) # per batch normalization
-            # s = (s - s.mean(dim=(1,2), keepdim=True)) / (s.std(dim=(1,2), keepdim=True) + 1e-8) # per-pair normalization
-            # convert similarity to positive cost (higher similarity -> lower cost)
-            # C = F.softplus(-s + self.sub_bias) # (B, N, N)
             C = F.softplus(-s + self.sub_bias)
 
         C = C.masked_fill(~mask, 0.0)
@@ -107,136 +99,38 @@ class CostMatrixBuilder(nn.Module):
             C_padded: (B, N_max, N_max) cost matrices
             mask1, mask2: (B, N_max) validity masks
         """
-        # Convert variable-size graphs to dense padded tensors
-        # H1, mask1, counts1 = self.to_dense_node_embeddings(node_repr_b1, batch1)
-        # H2, mask2, counts2 = self.to_dense_node_embeddings(node_repr_b2, batch2)
 
-        B, N_max, d = H1.shape
+        _, N_max, _ = H1.shape
 
-        # Compute substitution cost
         subs = self.substitution_cost(H1, H2, mask1, mask2)
         C = subs.clone()
 
         updated_mask1 = mask1.clone()
 
-        # Compute indel costs
-        # if self.model_indel is not None:
-        #     _, N, _ = subs.shape
-        #     # insertion: which nodes in G2 (columns) are likely to be inserted into G1
-        #     c_ins = self.model_indel(H2, graph_emb_b1)
+        # counts1 = mask1.sum(dim=1)
+        # counts2 = mask2.sum(dim=1)
 
-        #     # deletion: which nodes in G1 (rows) are likely to be deleted
-        #     c_del = self.model_indel(H1, graph_emb_b2)
+        # g1_expand = g1_emb.unsqueeze(1).expand(-1, N_max, -1)
 
-        #     # broadcast these indels
-        #     c_ins_mat = c_ins.unsqueeze(1).expand(-1, N, -1) # (B, N, N)
-        #     c_del_mat = c_del.unsqueeze(2).expand(-1, -1, N) # (B, N, N)
+        # ins_input = torch.cat([H2, g1_expand], dim=-1)
 
-        #     # mask real nodes
-        #     mask1_bool = mask1.bool()
-        #     mask2_bool = mask2.bool()
+        # eps = F.softplus(
+        #     self.ins_mlp(ins_input)
+        # ).squeeze(-1)
 
-        #     # Dummy-row mask: row is padded (not real) & col is real -> this cell should be insertion cost for that column
-        #     dummy_row_mask = (~mask1_bool).unsqueeze(2) & mask2_bool.unsqueeze(1)   # (B, N, N)
-        #     # Dummy-col mask: row is real & col is padded (not real) -> deletion cost for that row
-        #     dummy_col_mask = mask1_bool.unsqueeze(2) & (~mask2_bool).unsqueeze(1)   # (B, N, N)
-        #     # Dummy-dummy mask: both padded -> set zero
-        #     dummy_dummy_mask = (~mask1_bool).unsqueeze(2) & (~mask2_bool).unsqueeze(1)
+        # row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
 
-        #     C = subs.clone()
-        #     # Where dummy_row_mask is True -> use c_ins_mat
-        #     C = torch.where(dummy_row_mask, c_ins_mat, C)
-        #     # Where dummy_col_mask is True -> use c_del_mat
-        #     C = torch.where(dummy_col_mask, c_del_mat, C)
-        #     # Where both dummy -> zero
-        #     C = torch.where(dummy_dummy_mask, torch.zeros_like(C), C)
-        # else:
-        #     C = subs
+        # eps_row_mask_per_graph = (
+        #     (row_idx >= counts1.unsqueeze(1)) &
+        #     (row_idx < counts2.unsqueeze(1))
+        # )
 
-        # Indel cost model
-        counts1 = mask1.sum(dim=1)
-        counts2 = mask2.sum(dim=1)
+        # eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
 
-        # Add learnable epsilon rows for insertion
-        # eps_mat = torch.zeros_like(C)
+        # eps_values = eps.unsqueeze(1).expand(-1, N_max, -1)
 
-        # valid_mask = mask1.unsqueeze(2) & mask2.unsqueeze(1)
+        # C = torch.where(eps_row_mask, eps_values, C)
 
-        # mean_sub_cost = (subs * valid_mask).sum() / valid_mask.sum().clamp(min=1)
-        # valid_counts = valid_mask.sum(dim=(1,2)).clamp(min=1)   # (B,)
-
-        # mean substitution cost per graph
-        # mean_sub_cost = (subs * valid_mask).sum(dim=(1,2)) / valid_counts  # (B,)
-
-        # scale learnable eps with graph statistics
-        # learn scalar epsilon and scale it based on graph pair statistics
-        # eps_rows = F.softplus(self.eps_rows) #* mean_sub_cost.detach()
-        # eps = F.softplus(self.eps)
-        
-        # eps_rows = eps_rows.unsqueeze(0)
-
-        # mean_sub_cost = mean_sub_cost.unsqueeze(1)
-
-        # eps_rows_scaled = eps_rows * mean_sub_cost
-        # eps_scaled = eps * mean_sub_cost.detach()
-
-        # eps = F.softplus(self.ins_mlp(H2)).squeeze(-1) # (B,N)
-
-        # New
-        g1_expand = g1_emb.unsqueeze(1).expand(-1, N_max, -1)
-
-        ins_input = torch.cat([H2, g1_expand], dim=-1)
-
-        eps = F.softplus(
-            self.ins_mlp(ins_input)
-        ).squeeze(-1)
-
-        row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
-
-        eps_row_mask_per_graph = (
-            (row_idx >= counts1.unsqueeze(1)) &
-            (row_idx < counts2.unsqueeze(1))
-        )
-
-        eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
-
-        # eps_values = eps_rows_scaled.unsqueeze(0).unsqueeze(2)
-        # eps_values = eps_rows_scaled.unsqueeze(2)
-        # eps_values = eps_values.expand(B, -1, N_max)
-        # eps_values = eps_values.expand(-1, -1, N_max)
-        # broadcast scalar per graph
-        # eps_values = eps_scaled.view(B, 1, 1).expand(-1, N_max, N_max)
-        # eps_values = eps.view(B, 1, 1).expand(-1, N_max, N_max)
-        eps_values = eps.unsqueeze(1).expand(-1, N_max, -1)
-
-        C = torch.where(eps_row_mask, eps_values, C)
-
-        updated_mask1 = mask1 | eps_row_mask_per_graph
+        # updated_mask1 = mask1 | eps_row_mask_per_graph
 
         return C, updated_mask1, mask2
-
-        # for b in range(B):
-        #     n1 = counts1[b].item()
-        #     n2 = counts2[b].item()
-        #     if n2 > n1:
-        #         # Rows n1..n2-1 are epsilon rows for insertion
-        #         eps_row_idx = torch.arange(n1, n2, device=C.device)
-        #         # Broadcast scalar eps cost for each column in G2
-        #         eps_mat[b, eps_row_idx, :n2] = eps_rows_scaled[eps_row_idx].unsqueeze(1)
-        #         # Update mask1 to incorporate epsilon rows
-        #         updated_mask1[b, n1:n2] = 1
-        
-        # # Apply epsilon rows only where the row is not real
-        # eps_row_mask = (~mask1).unsqueeze(2) & mask2.unsqueeze(1)
-        # C = torch.where(eps_row_mask, eps_mat, C)
-
-        # # Padding outside G2 nodes stays zero
-        # dummy_col_mask = mask2.unsqueeze(1) == 0
-        # C = torch.where(dummy_col_mask, torch.zeros_like(C), C)
-
-        # # Dummy-dummy (padding rows and columns) = 0
-        # dummy_dummy_mask = (~mask1).unsqueeze(2) & (~mask2).unsqueeze(1)
-        # C = torch.where(dummy_dummy_mask, torch.zeros_like(C), C)
-
-        # return C, mask1, mask2
-        # return C, updated_mask1, mask2

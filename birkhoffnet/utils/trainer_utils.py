@@ -146,35 +146,18 @@ class SiameseTrainer:
         self.criterion = criterion
         self.config = config
 
-        # self.optimizer = torch.optim.AdamW(
-        #     list(alpha_layer.parameters())
-        #     + list(cost_builder.parameters())
-        #     + list(criterion.parameters()),
-        #     lr=config.training.lr_siamese,
-        #     weight_decay=config.training.weight_decay,
-        # )
-
         self.optimizer = torch.optim.AdamW([
             {"params": alpha_layer.model.parameters(), "lr": config.training.lr_siamese},
             {"params": cost_builder.parameters(), "lr": config.training.lr_siamese},
-            {"params": criterion.parameters(), "lr": config.training.lr_siamese}
+            {"params": criterion.parameters(), "lr": config.training.lr_siamese},
+            {"params": alpha_layer.log_temperature, "lr": config.training.lr_siamese},
         ], weight_decay=config.training.weight_decay)
-
-        self.temp_optimizer = torch.optim.AdamW(
-            [alpha_layer.log_temperature],
-            lr=1e-2
-        )
 
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=config.training.epochs_siamese,
             eta_min=5e-4
         )
-
-        # self.temp_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        #     self.temp_optimizer,
-        #     gamma=0.995
-        # )
 
         self.node_cache, self.mask_cache, self.graph_cache = self._precompute_embeddings(graph_loader)
 
@@ -187,8 +170,8 @@ class SiameseTrainer:
         best_val_loss = float("inf")
         best_epoch = 0
         patience_counter = 0
-        patience = 100
-        tol = 1e-4
+        patience = 50
+        tol = 1e-5
 
         for epoch in range(self.config.training.epochs_siamese):
 
@@ -232,7 +215,7 @@ class SiameseTrainer:
             f"- RMSE: {np.sqrt(test_loss):.6f}"
         )
 
-        # self._save_checkpoint()
+        self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step
@@ -243,64 +226,65 @@ class SiameseTrainer:
         self.alpha_layer.train()
         self.criterion.train()
 
-        for batch1, batch2, ged_labels in loader:
+        for graphs_a, graphs_b, target_similarity in loader:
 
-            batch1 = batch1.to(self.config.device)
-            batch2 = batch2.to(self.config.device)
-            ged_labels = ged_labels.to(self.config.device)
+            graphs_a = graphs_a.to(self.config.device)
+            graphs_b = graphs_b.to(self.config.device)
+            target_similarity = target_similarity.to(self.config.device)
 
-            idx1 = batch1.graph_id.cpu()
-            idx2 = batch2.graph_id.cpu()
+            graph_ids_a = graphs_a.graph_id.cpu()
+            graph_ids_b = graphs_b.graph_id.cpu()
 
-            node_repr_b1 = self.node_cache[idx1].to(self.config.device)
-            mask1 = self.mask_cache[idx1].to(self.config.device)
-            graph_repr_b1 = self.graph_cache[idx1].to(self.config.device)
+            node_emb_a, graph_emb_a, node_mask_a = self._get_cached_embeddings(graph_ids_a)
+            node_emb_b, graph_emb_b, node_mask_b = self._get_cached_embeddings(graph_ids_b)
 
-            node_repr_b2 = self.node_cache[idx2].to(self.config.device)
-            mask2 = self.mask_cache[idx2].to(self.config.device)
-            graph_repr_b2 = self.graph_cache[idx2].to(self.config.device)
-
-            n_nodes_1 = mask1.sum(dim=1)
-            n_nodes_2 = mask2.sum(dim=1)
-            normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
+            num_nodes_a = node_mask_a.sum(dim=1)
+            num_nodes_b = node_mask_b.sum(dim=1)
+            avg_num_nodes = 0.5 * (num_nodes_a + num_nodes_b)
 
             self.optimizer.zero_grad()
-            self.temp_optimizer.zero_grad()
 
-            cost_matrices, mask1, mask2 = self.cost_builder(
-                node_repr_b1, mask1, graph_repr_b1,
-                node_repr_b2, mask2
+            cost_matrix, node_mask_a, node_mask_b = self.cost_builder(
+                node_emb_a,
+                node_mask_a,
+                graph_emb_a,
+                node_emb_b,
+                node_mask_b,
             )
 
-            soft_assignments, alphas = self.alpha_layer(
-                graph_repr_b1, graph_repr_b2
+            assignment_matrix, alphas = self.alpha_layer(
+                graph_emb_a,
+                graph_emb_b,
             )
 
-            # Track alpha usage
             if self.config.perm_evo.evolve:
                 self.alpha_tracker.collect(alphas)
 
-            soft_assignments = self._normalize_assignment(
-                soft_assignments, mask1, mask2
+            assignment_matrix = self._normalize_assignment(
+                assignment_matrix,
+                node_mask_a,
+                node_mask_b,
             )
 
-            predicted_ged = self.criterion(cost_matrices, soft_assignments)
-            normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
+            pred_ged = self.criterion(
+                cost_matrix,
+                assignment_matrix,
+            )
 
-            loss = self.alpha_layer.mse_loss(
-                normalized_predicted, 
-                ged_labels, 
-                use_entropy=self.config.training.use_entropy, 
+            pred_similarity = torch.exp(-pred_ged / avg_num_nodes)
+
+            loss = self.alpha_layer.loss_fn(
+                pred_similarity,
+                target_similarity,
+                use_entropy=self.config.training.use_entropy,
                 alphas=alphas,
-                epoch=epoch
+                epoch=epoch,
             )
 
             loss.backward()
             self.optimizer.step()
-            self.temp_optimizer.step()
         
         self.scheduler.step()
-        # self.temp_scheduler.step()
 
         # ----------------------------------
         # Genetic permutation evolution
@@ -315,8 +299,6 @@ class SiameseTrainer:
                 k = self.config.model.k
                 ratio = self.config.perm_evo.replace_ratio
                 n_replace = max(1, int(k * ratio))
-                
-                # n_replace = self.config.perm_evo.num_replace
 
                 self.perm_pool.mate_permutations(
                     sorted_idx, 
@@ -342,54 +324,63 @@ class SiameseTrainer:
         total_loss = 0
         total_samples = 0
 
-        for batch1, batch2, ged_labels in loader:
+        for graphs_a, graphs_b, target_similarity in loader:
 
-            batch1 = batch1.to(self.config.device)
-            batch2 = batch2.to(self.config.device)
-            ged_labels = ged_labels.to(self.config.device)
+            graphs_a = graphs_a.to(self.config.device)
+            graphs_b = graphs_b.to(self.config.device)
+            target_similarity = target_similarity.to(self.config.device)
 
-            idx1 = batch1.graph_id
-            idx2 = batch2.graph_id
+            graph_ids_a = graphs_a.graph_id
+            graph_ids_b = graphs_b.graph_id
 
-            node_repr_b1 = self.node_cache[idx1]
-            mask1 = self.mask_cache[idx1]
-            graph_repr_b1 = self.graph_cache[idx1]
+            node_emb_a, graph_emb_a, node_mask_a = self._get_cached_embeddings(graph_ids_a)
+            node_emb_b, graph_emb_b, node_mask_b = self._get_cached_embeddings(graph_ids_b)
 
-            node_repr_b2 = self.node_cache[idx2]
-            mask2 = self.mask_cache[idx2]
-            graph_repr_b2 = self.graph_cache[idx2]
+            num_nodes_a = node_mask_a.sum(dim=1)
+            num_nodes_b = node_mask_b.sum(dim=1)
+            avg_num_nodes = 0.5 * (num_nodes_a + num_nodes_b)
 
-            n_nodes_1 = mask1.sum(dim=1)
-            n_nodes_2 = mask2.sum(dim=1)
-            normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
-
-            cost_matrices, mask1, mask2 = self.cost_builder(
-                node_repr_b1, mask1, graph_repr_b1,
-                node_repr_b2, mask2
+            cost_matrix, node_mask_a, node_mask_b = self.cost_builder(
+                node_emb_a,
+                node_mask_a,
+                graph_emb_a,
+                node_emb_b,
+                node_mask_b,
             )
 
-            soft_assignments, _ = self.alpha_layer(
-                graph_repr_b1, graph_repr_b2
+            assignment_matrix, _ = self.alpha_layer(
+                graph_emb_a,
+                graph_emb_b,
             )
 
-            soft_assignments = self._normalize_assignment(
-                soft_assignments, mask1, mask2
+            assignment_matrix = self._normalize_assignment(
+                assignment_matrix,
+                node_mask_a,
+                node_mask_b,
             )
 
-            predicted_ged = self.criterion(cost_matrices, soft_assignments)
+            pred_ged = self.criterion(
+                cost_matrix,
+                assignment_matrix,
+            )
+
             # print(predicted_ged[:20].to(torch.int32).detach().cpu().numpy())
             # unormalized_ged = - normalization_factor * torch.log(ged_labels.clamp(min=1e-8))
             # print(unormalized_ged[:20].to(torch.int32).detach().cpu().numpy())
 
-            normalized_predicted = torch.exp(-predicted_ged / normalization_factor)
-
-            loss = self.alpha_layer.mse_loss(
-                normalized_predicted, 
-                ged_labels
+            pred_similarity = torch.exp(
+                -pred_ged / avg_num_nodes
             )
 
-            total_loss += loss.item() * ged_labels.size(0)
-            total_samples += ged_labels.size(0)
+            loss = self.alpha_layer.loss_fn(
+                pred_similarity,
+                target_similarity,
+            )
+
+            batch_size = target_similarity.size(0)
+
+            total_loss += loss.item() * batch_size
+            total_samples += batch_size
 
         return total_loss / total_samples
     
@@ -404,44 +395,55 @@ class SiameseTrainer:
         self.cost_builder.eval()
         self.criterion.eval()
 
-        distance_matrix = torch.zeros((num_graphs, num_graphs), dtype=torch.float32, device=self.config.device)
+        distance_matrix = torch.zeros(
+            (num_graphs, num_graphs), 
+            dtype=torch.float32, 
+            device=self.config.device
+        )
         
-        t0 = time()
+        start_time = time()
 
-        for batch in loader:
+        for graphs_a, graphs_b, _, graph_ids_a, graph_ids_b in loader:
 
-            batch1, batch2, _, idx1, idx2 = batch
-            batch1, batch2, idx1, idx2 = batch1.to(self.config.device), batch2.to(self.config.device), idx1.to(self.config.device), idx2.to(self.config.device)
+            graphs_a = graphs_a.to(self.config.device)
+            graphs_b = graphs_b.to(self.config.device)
 
-            node_repr_b1 = self.node_cache[idx1]
-            mask1 = self.mask_cache[idx1]
-            graph_repr_b1 = self.graph_cache[idx1]
+            graph_ids_a = graph_ids_a.to(self.config.device)
+            graph_ids_b = graph_ids_b.to(self.config.device)
 
-            node_repr_b2 = self.node_cache[idx2]
-            mask2 = self.mask_cache[idx2]
-            graph_repr_b2 = self.graph_cache[idx2]
+            node_emb_a, graph_emb_a, node_mask_a = self._get_cached_embeddings(graph_ids_a)
+            node_emb_b, graph_emb_b, node_mask_b = self._get_cached_embeddings(graph_ids_b)
 
-            cost_matrices, mask1, mask2 = self.cost_builder(
-                node_repr_b1, mask1, graph_repr_b1,
-                node_repr_b2, mask2
+            cost_matrix, node_mask_a, node_mask_b = self.cost_builder(
+                node_emb_a,
+                node_mask_a,
+                graph_emb_a,
+                node_emb_b,
+                node_mask_b,
             )
 
-            soft_assignments, _ = self.alpha_layer(
-                graph_repr_b1, graph_repr_b2
-            )
-            
-            soft_assignments = self._normalize_assignment(
-                soft_assignments, mask1, mask2
+            assignment_matrix, _ = self.alpha_layer(
+                graph_emb_a,
+                graph_emb_b,
             )
 
-            predicted_ged = self.criterion(cost_matrices, soft_assignments)
+            assignment_matrix = self._normalize_assignment(
+                assignment_matrix,
+                node_mask_a,
+                node_mask_b,
+            )
 
-            distance_matrix[idx1, idx2] = predicted_ged
-            distance_matrix[idx2, idx1] = predicted_ged
+            pred_ged = self.criterion(
+                cost_matrix,
+                assignment_matrix,
+            )
+
+            distance_matrix[graph_ids_a, graph_ids_b] = pred_ged
+            distance_matrix[graph_ids_b, graph_ids_a] = pred_ged
         
-        t1 = time()
-        runtime = t1 - t0
-        logging.info(f'Runtime: {runtime:.4f}')
+        runtime = time() - start_time
+
+        logging.info(f'Inference runtime: {runtime:.4f}')
 
         return distance_matrix.to(torch.int32).cpu().numpy()
     
@@ -498,6 +500,13 @@ class SiameseTrainer:
     # Utilities
     # --------------------------------------------------------
 
+    def _get_cached_embeddings(self, graph_ids):
+        return (
+            self.node_cache[graph_ids].to(self.config.device),
+            self.graph_cache[graph_ids].to(self.config.device),
+            self.mask_cache[graph_ids].to(self.config.device),
+        )
+
     def _normalize_assignment(self, S, mask1, mask2):
         S = S * (mask1.unsqueeze(2) & mask2.unsqueeze(1))
 
@@ -513,8 +522,6 @@ class SiameseTrainer:
             "criterion": self.criterion.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict(),
-            "temp_optimizer": self.temp_optimizer.state_dict(),
-            # "temp_scheduler": self.temp_scheduler.state_dict(),
             "perms": self.alpha_layer.perm_vectors
         }, f'{self.config.output_dir}/ckpt_ged.pth')
     

@@ -121,7 +121,8 @@ class AlphaPermutationLayer(nn.Module):
             perm_vectors: torch.Tensor, 
             model: nn.Module,
             min_temp: float = 0.5,
-            max_temp: float = 5.0,
+            max_temp: float = 3.0,
+            entropy_weight: float = 0.02
     ):
         """
         Args:
@@ -141,6 +142,9 @@ class AlphaPermutationLayer(nn.Module):
         self.log_temperature = nn.Parameter(torch.tensor(0.0))
         self.min_temp = min_temp
         self.max_temp = max_temp
+
+        # Entropy weight
+        self.entropy_weight = entropy_weight
     
     # --------------------------------------------------
     # Temperature
@@ -182,42 +186,34 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     # Loss
     # --------------------------------------------------
-    def mse_loss(self, pred, target, use_entropy=False, alphas=None, epoch=None):
+    def loss_fn(self, pred, target, use_entropy=False, alphas=None, epoch=None):
         
+        mae = F.l1_loss(pred, target, reduction="mean")
         mse = F.mse_loss(pred, target, reduction="mean")
 
+        # Choose optimization objective
         loss = mse
         
         if use_entropy and alphas is not None:
 
-            entropy = self.get_entropy(alphas) #-(alphas * torch.log(alphas + 1e-8)).sum(dim=-1).mean()
+            entropy = self.get_entropy(alphas)
 
-            beta = 0.02
-            bonus = beta * mse.detach() * entropy
+            penalty = self.entropy_weight * loss.detach() * entropy
 
-            loss = loss - bonus
+            loss = loss - penalty
 
         if alphas is not None:
-            if epoch % 1 == 0:
-                
-                logging.info(
-                    f"[Epoch {epoch}] "
-                    f"Train MSE: {mse.item():.4f} | "
-                    f"Entropy: {entropy.item():.3f} | "
-                    f"T: {self.get_temperature():.2f} | "
-                    f"Eff_k: {self.effective_k(alphas):.2f} "
-                    f"{bonus.item():.4f} and {bonus / mse}"
-                )
 
-            # if epoch % 1 == 0:
-            #     logging.info(
-            #         f"[Epoch {epoch}] "
-            #         f"MSE: {loss.item():.4f} | "
-            #         f"T: {self.get_temperature():.2f} | "
-            #         f"Eff_k: {self.effective_k(alphas):.2f}"
-                # )
-        # error = torch.abs(pred - target) / torch.max(target)
-        # loss = torch.mean(error)
+            logging.info(
+                f"[Epoch {epoch}] "
+                f"Train MAE: {mae.item():.4f} | "
+                f"Train MSE: {mse.item():.4f} | "
+                f"Entropy: {entropy.item():.3f} | "
+                f"T: {self.get_temperature():.2f} | "
+                f"Eff_k: {self.effective_k(alphas):.2f} | "
+                f"Penalty: {penalty.item():.4f} | "
+                f"Penalty/Loss: {(penalty / (mse + 1e-8)).item():.4f}"
+            )
         
         return loss
     

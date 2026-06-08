@@ -525,64 +525,71 @@ def main(args):
         for (gid, g) in all_graph:
             graph_cache[gid] = g
 
-        for batch in loader:
+        for graphs_a, graphs_b, target_similarity in loader:
 
-            batch1, batch2, ged = batch
-            batch1, batch2, ged = batch1.to(device), batch2.to(device), ged.to(device)
+            graphs_a = graphs_a.to(config.device)
+            graphs_b = graphs_b.to(config.device)
+            target_similarity = target_similarity.to(config.device)
 
-            idx1, idx2 = batch1.graph_id, batch2.graph_id
+            graph_ids_a = graphs_a.graph_id
+            graph_ids_b = graphs_b.graph_id
 
-            node_repr_b1 = node_cache[idx1]
-            mask1 = mask_cache[idx1]
-            graph_repr_b1 = graph_cache[idx1]
+            node_emb_a = node_cache[graph_ids_a]
+            node_mask_a = mask_cache[graph_ids_a]
+            graph_emb_a = graph_cache[graph_ids_a]
 
-            node_repr_b2 = node_cache[idx2]
-            mask2 = mask_cache[idx2]
-            graph_repr_b2 = graph_cache[idx2]
+            node_emb_b = node_cache[graph_ids_b]
+            node_mask_b = mask_cache[graph_ids_b]
+            graph_emb_b = graph_cache[graph_ids_b]
 
-            n_nodes_1 = batch1.batch.bincount()
-            n_nodes_2 = batch2.batch.bincount()
+            num_nodes_a = node_mask_a.sum(dim=1)
+            num_nodes_b = node_mask_b.sum(dim=1)
 
-            normalization_factor = 0.5 * (n_nodes_1 + n_nodes_2)
+            avg_num_nodes = 0.5 * (num_nodes_a + num_nodes_b)
 
-            cost_matrices, masks1, masks2 = cost_builder(
-                node_repr_b1, mask1, graph_repr_b1,
-                node_repr_b2, mask2
+            cost_matrix, node_mask_a, node_mask_b = cost_builder(
+                node_emb_a,
+                node_mask_a,
+                graph_emb_a,
+                node_emb_b,
+                node_mask_b,
             )
 
-            soft_assignments, alphas = alpha_layer(
-                graph_repr_b1, graph_repr_b2
+            assignment_matrix, alphas = alpha_layer(
+                graph_emb_a,
+                graph_emb_b,
             )
 
-            assignment_masks = masks1.unsqueeze(2) * masks2.unsqueeze(1)
+            assignment_mask = node_mask_a.unsqueeze(2) * node_mask_b.unsqueeze(1)
 
-            soft_assignments = soft_assignments * assignment_masks
+            assignment_matrix = assignment_matrix * assignment_mask
 
-            row_sums = soft_assignments.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-            soft_assignments = soft_assignments / row_sums
+            row_sums = assignment_matrix.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+            assignment_matrix = assignment_matrix / row_sums
 
-            col_sums = soft_assignments.sum(dim=-2, keepdim=True).clamp(min=1e-8)
-            soft_assignments = soft_assignments / col_sums
+            col_sums = assignment_matrix.sum(dim=-2, keepdim=True).clamp(min=1e-8)
+            assignment_matrix = assignment_matrix / col_sums
 
-            predicted_ged = criterion(cost_matrices, soft_assignments)
-
-            normalized_predicted_ged = torch.exp(
-                -predicted_ged / normalization_factor
+            pred_ged = criterion(
+                cost_matrix,
+                assignment_matrix,
             )
 
-            print(normalized_predicted_ged)
+            pred_similarity = torch.exp(
+                -pred_ged / avg_num_nodes
+            )
+
+            print(pred_similarity)
 
     # --------------------------------------------------
     # 9. Visualization
     # --------------------------------------------------
 
-    plot_assignments_and_alphas(dataset, indices[0], indices[1], soft_assignments[0].cpu(), alphas[0].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[2], soft_assignments[1].cpu(), alphas[1].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[3], soft_assignments[2].cpu(), alphas[2].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[4], soft_assignments[3].cpu(), alphas[3].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[5], soft_assignments[4].cpu(), alphas[4].cpu().numpy())
-    # plot_assignments_and_alphas(indices[0], indices[2], soft_assignments[1], alphas[1].cpu().numpy())
-    # plot_assignments_and_alphas(indices[0], indices[3], soft_assignments[2], alphas[2].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[1], assignment_matrix[0].cpu(), alphas[0].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[2], assignment_matrix[1].cpu(), alphas[1].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[3], assignment_matrix[2].cpu(), alphas[2].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[4], assignment_matrix[3].cpu(), alphas[3].cpu().numpy())
+    plot_assignments_and_alphas(dataset, indices[0], indices[5], assignment_matrix[4].cpu(), alphas[4].cpu().numpy())
 
 
 if __name__ == '__main__':
