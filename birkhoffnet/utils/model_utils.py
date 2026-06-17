@@ -65,10 +65,13 @@ class ModelFactory:
         cost_builder = CostMatrixBuilder(
             embedding_dim=config.model.embedding_dim,
             max_graph_size=max_graph_size,
-            use_learned_sub=False
+            use_learned_sub=config.training.use_learn_sub,
+            use_learned_ins=config.training.use_learn_ins
         ).to(config.device)
 
-        criterion = GEDLoss().to(config.device)
+        criterion = GEDLoss(
+            use_scale=config.training.use_scale
+        ).to(config.device)
 
         return ModelComponents(
             modules=ModelModules(

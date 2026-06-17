@@ -36,6 +36,9 @@ class TrainingParams:
     triplet_margin: float
     use_entropy: bool
     entropy_weight: float
+    use_scale: bool
+    use_learn_sub: bool
+    use_learn_ins: bool
 
 
 @dataclass

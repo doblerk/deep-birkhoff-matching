@@ -6,18 +6,20 @@ from torch_geometric.utils import to_dense_batch
 
 
 class CostMatrixBuilder(nn.Module):
-    def __init__(self, embedding_dim, max_graph_size, use_learned_sub=False):
+    def __init__(self, embedding_dim, max_graph_size, use_learned_sub=False, use_learned_ins=False):
         super().__init__()
         self.d = embedding_dim
         self.max_graph_size = max_graph_size
         self.use_learned_sub = use_learned_sub
+        self.use_learned_ins = use_learned_ins
 
         if use_learned_sub:
             # single bilinear matrix W for substitution (learned similarity)
             # Use a factorization of W to ensure it is symmetric and positive semidefinite
-            r = embedding_dim
-            self.L = nn.Parameter(torch.randn(self.d, r))
+            # self.L = nn.Parameter(torch.randn(self.d, r))
+            self.L = nn.Parameter(torch.eye(self.d) + 0.01 * torch.randn(self.d, self.d))
             self.sub_bias = nn.Parameter(torch.tensor(1.0))
+
         else:
             self.sub_L = None
 
@@ -69,15 +71,24 @@ class CostMatrixBuilder(nn.Module):
             # compute batched p-norm (default Euclidean)
             C = torch.cdist(H1, H2, p=2)
         else:
-            H1 = F.normalize(H1, dim=-1)
-            H2 = F.normalize(H2, dim=-1)
+            # H1 = F.normalize(H1, dim=-1)
+            # H2 = F.normalize(H2, dim=-1)
             # build W = L @ L^T (guaranteed to be PSD)
             W = self.L @ self.L.T
-            W = W / (W.norm() + 1e-8)
+            # W = W / (W.norm() + 1e-8)
             # weighted h1 = H1 @ W
-            weighted_h1 = torch.einsum('bnd,dk->bnk', H1, W)
-            s = torch.einsum('bnk,bmk->bnm', weighted_h1, H2)
-            C = F.softplus(-s + self.sub_bias)
+            # weighted_h1 = torch.einsum('bnd,dk->bnk', H1, W)
+            # s = torch.einsum('bnk,bmk->bnm', weighted_h1, H2)
+            # C = F.softplus(-s + self.sub_bias)
+            Wx1 = H1 @ W
+            Wx2 = H2 @ W
+
+            term1 = (Wx1 * H1).sum(-1, keepdim=True)      # (B,N1,1)
+            term2 = (Wx2 * H2).sum(-1).unsqueeze(1)       # (B,1,N2)
+
+            cross = torch.bmm(Wx1, H2.transpose(1,2))     # (B,N1,N2)
+
+            C = term1 + term2 - 2 * cross
 
         C = C.masked_fill(~mask, 0.0)
         return C
@@ -107,30 +118,32 @@ class CostMatrixBuilder(nn.Module):
 
         updated_mask1 = mask1.clone()
 
-        # counts1 = mask1.sum(dim=1)
-        # counts2 = mask2.sum(dim=1)
+        if self.use_learned_ins:
 
-        # g1_expand = g1_emb.unsqueeze(1).expand(-1, N_max, -1)
+            counts1 = mask1.sum(dim=1)
+            counts2 = mask2.sum(dim=1)
 
-        # ins_input = torch.cat([H2, g1_expand], dim=-1)
+            g1_expand = g1_emb.unsqueeze(1).expand(-1, N_max, -1)
 
-        # eps = F.softplus(
-        #     self.ins_mlp(ins_input)
-        # ).squeeze(-1)
+            ins_input = torch.cat([H2, g1_expand], dim=-1)
 
-        # row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
+            eps = F.softplus(
+                self.ins_mlp(ins_input)
+            ).squeeze(-1)
 
-        # eps_row_mask_per_graph = (
-        #     (row_idx >= counts1.unsqueeze(1)) &
-        #     (row_idx < counts2.unsqueeze(1))
-        # )
+            row_idx = torch.arange(N_max, device=C.device).unsqueeze(0)  # (1, N)
 
-        # eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
+            eps_row_mask_per_graph = (
+                (row_idx >= counts1.unsqueeze(1)) &
+                (row_idx < counts2.unsqueeze(1))
+            )
 
-        # eps_values = eps.unsqueeze(1).expand(-1, N_max, -1)
+            eps_row_mask = eps_row_mask_per_graph.unsqueeze(2) & mask2.unsqueeze(1)
 
-        # C = torch.where(eps_row_mask, eps_values, C)
+            eps_values = eps.unsqueeze(1).expand(-1, N_max, -1)
 
-        # updated_mask1 = mask1 | eps_row_mask_per_graph
+            C = torch.where(eps_row_mask, eps_values, C)
+
+            updated_mask1 = mask1 | eps_row_mask_per_graph
 
         return C, updated_mask1, mask2

@@ -172,7 +172,7 @@ def main(args):
     alpha_layer = components.modules.alpha_layer
     cost_builder = components.modules.cost_builder
     
-    criterion = GEDLoss().to(config.device)
+    criterion = GEDLoss(use_scale=True).to(config.device)
 
     # --------------------------------------------------
     # 5. Load checkpoints

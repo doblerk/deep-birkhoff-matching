@@ -176,11 +176,18 @@ class SiameseTrainer:
         for epoch in range(self.config.training.epochs_siamese):
 
             self._train_one_epoch(train_loader, epoch)
+
+            val_loss = self.evaluate(val_loader)
+
+            if val_loss < best_val_loss - tol:
+                best_val_loss = val_loss
+                best_epoch = epoch
+                patience_counter = 0
+                self._save_checkpoint()
+            else:
+                patience_counter += 1
             
             if epoch % 1 == 0:
-
-                val_loss = self.evaluate(val_loader)
-                
                 logging.info(
                     f"[GED] Epoch {epoch+1}/{self.config.training.epochs_siamese} "
                     f"- Val MSE: {val_loss:.4f} "
@@ -188,22 +195,13 @@ class SiameseTrainer:
                     f"- Scale: {self.criterion.scale.item():.4f}"
                 )
 
-                # Improvement = LOWER loss
-                if val_loss < best_val_loss - tol:
-                    best_val_loss = val_loss
-                    best_epoch = epoch
-                    patience_counter = 0
-                    self._save_checkpoint()
-                else:
-                    patience_counter += 1
-
-                if patience_counter >= patience:
-                    logging.info(
-                        f"Early stopping triggered at epoch {epoch+1}. "
-                        f"Best epoch was {best_epoch+1} "
-                        f"with val MSE={best_val_loss:.6f}"
-                    )
-                    break
+            if patience_counter >= patience:
+                logging.info(
+                    f"Early stopping triggered at epoch {epoch+1}. "
+                    f"Best epoch was {best_epoch+1} "
+                    f"with val MSE={best_val_loss:.6f}"
+                )
+                break
                     
         # Restore best checkpoint before testing
         self._load_checkpoint()
@@ -214,8 +212,6 @@ class SiameseTrainer:
             f"[GED] Final Test MSE: {test_loss:.6f} "
             f"- RMSE: {np.sqrt(test_loss):.6f}"
         )
-
-        self._save_checkpoint()
 
     # --------------------------------------------------------
     # Internal Training Step

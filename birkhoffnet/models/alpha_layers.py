@@ -191,8 +191,10 @@ class AlphaPermutationLayer(nn.Module):
         mae = F.l1_loss(pred, target, reduction="mean")
         mse = F.mse_loss(pred, target, reduction="mean")
 
-        # Choose optimization objective
         loss = mse
+
+        entropy = None
+        penalty = None
         
         if use_entropy and alphas is not None:
 
@@ -202,18 +204,31 @@ class AlphaPermutationLayer(nn.Module):
 
             loss = loss - penalty
 
-        if alphas is not None:
+        # if alphas is not None:
 
-            logging.info(
-                f"[Epoch {epoch}] "
-                f"Train MAE: {mae.item():.4f} | "
-                f"Train MSE: {mse.item():.4f} | "
-                f"Entropy: {entropy.item():.3f} | "
-                f"T: {self.get_temperature():.2f} | "
-                f"Eff_k: {self.effective_k(alphas):.2f} | "
-                f"Penalty: {penalty.item():.4f} | "
-                f"Penalty/Loss: {(penalty / (mse + 1e-8)).item():.4f}"
-            )
+        #     entropy_str = (
+        #         f"{entropy.item():.3f}" if entropy is not None else "N/A"
+        #     )
+
+        #     penalty_str = (
+        #         f"{penalty.item():.4f}" if penalty is not None else "0.0000"
+        #     )
+
+
+        #     penalty_ratio = (
+        #         (penalty / (mse + 1e-8)).item() if penalty is not None else 0.0
+        #     )
+
+        #     logging.info(
+        #         f"[Epoch {epoch}] "
+        #         f"Train MAE: {mae.item():.4f} | "
+        #         f"Train MSE: {mse.item():.4f} | "
+        #         f"Entropy: {entropy_str} | "
+        #         f"T: {self.get_temperature():.2f} | "
+        #         f"Eff_k: {self.effective_k(alphas):.2f} | "
+        #         f"Penalty: {penalty_str} | "
+        #         f"Penalty/Loss: {penalty_ratio:.4f}"
+        #     )
         
         return loss
     
