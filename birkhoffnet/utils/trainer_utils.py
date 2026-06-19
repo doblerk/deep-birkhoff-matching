@@ -156,7 +156,7 @@ class SiameseTrainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=config.training.epochs_siamese,
-            eta_min=5e-4
+            eta_min=1e-4
         )
 
         self.node_cache, self.mask_cache, self.graph_cache = self._precompute_embeddings(graph_loader)
@@ -171,7 +171,7 @@ class SiameseTrainer:
         best_epoch = 0
         patience_counter = 0
         patience = 50
-        tol = 1e-5
+        tol = 1e-4
 
         for epoch in range(self.config.training.epochs_siamese):
 

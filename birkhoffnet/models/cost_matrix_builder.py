@@ -17,8 +17,8 @@ class CostMatrixBuilder(nn.Module):
             # single bilinear matrix W for substitution (learned similarity)
             # Use a factorization of W to ensure it is symmetric and positive semidefinite
             # self.L = nn.Parameter(torch.randn(self.d, r))
-            self.L = nn.Parameter(torch.eye(self.d) + 0.01 * torch.randn(self.d, self.d))
-            self.sub_bias = nn.Parameter(torch.tensor(1.0))
+            self.L = nn.Parameter(torch.eye(self.d) + 1e-2 * torch.randn(self.d, self.d))
+            # self.sub_bias = nn.Parameter(torch.tensor(1.0))
 
         else:
             self.sub_L = None
@@ -88,7 +88,8 @@ class CostMatrixBuilder(nn.Module):
 
             cross = torch.bmm(Wx1, H2.transpose(1,2))     # (B,N1,N2)
 
-            C = term1 + term2 - 2 * cross
+            # xTWx + yTWy − 2xTWy
+            C = (term1 + term2 - 2 * cross).clamp_min(0.0)
 
         C = C.masked_fill(~mask, 0.0)
         return C

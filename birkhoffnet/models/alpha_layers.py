@@ -27,7 +27,7 @@ class AlphaMLP(nn.Module):
         #     nn.Linear(input_dim * 2, k)
         # )
         self.mlp = nn.Sequential(
-            nn.Linear(4 * input_dim, 2 * input_dim),
+            nn.Linear(2 * input_dim, 2 * input_dim),
             nn.GELU(),
             nn.LayerNorm(2 * input_dim),
             nn.Dropout(0.2),
@@ -35,15 +35,15 @@ class AlphaMLP(nn.Module):
         )
     
     def forward(self, g1, g2):
-        # pair_repr = torch.cat([g1, g2], dim=-1)
-        # return self.mlp(pair_repr)
-        pair_repr = torch.cat([
-            g1,
-            g2,
-            torch.abs(g1 - g2),
-            g1 * g2
-        ], dim=-1)
+        pair_repr = torch.cat([g1, g2], dim=-1)
         return self.mlp(pair_repr)
+        # pair_repr = torch.cat([
+        #     g1,
+        #     g2,
+        #     torch.abs(g1 - g2),
+        #     g1 * g2
+        # ], dim=-1)
+        # return self.mlp(pair_repr)
 
 
 class AlphaBilinear(nn.Module):
@@ -204,31 +204,31 @@ class AlphaPermutationLayer(nn.Module):
 
             loss = loss - penalty
 
-        # if alphas is not None:
+        if alphas is not None:
 
-        #     entropy_str = (
-        #         f"{entropy.item():.3f}" if entropy is not None else "N/A"
-        #     )
+            entropy_str = (
+                f"{entropy.item():.3f}" if entropy is not None else "N/A"
+            )
 
-        #     penalty_str = (
-        #         f"{penalty.item():.4f}" if penalty is not None else "0.0000"
-        #     )
+            penalty_str = (
+                f"{penalty.item():.4f}" if penalty is not None else "0.0000"
+            )
 
 
-        #     penalty_ratio = (
-        #         (penalty / (mse + 1e-8)).item() if penalty is not None else 0.0
-        #     )
+            penalty_ratio = (
+                (penalty / (mse + 1e-8)).item() if penalty is not None else 0.0
+            )
 
-        #     logging.info(
-        #         f"[Epoch {epoch}] "
-        #         f"Train MAE: {mae.item():.4f} | "
-        #         f"Train MSE: {mse.item():.4f} | "
-        #         f"Entropy: {entropy_str} | "
-        #         f"T: {self.get_temperature():.2f} | "
-        #         f"Eff_k: {self.effective_k(alphas):.2f} | "
-        #         f"Penalty: {penalty_str} | "
-        #         f"Penalty/Loss: {penalty_ratio:.4f}"
-        #     )
+            logging.info(
+                f"[Epoch {epoch}] "
+                f"Train MAE: {mae.item():.4f} | "
+                f"Train MSE: {mse.item():.4f} | "
+                f"Entropy: {entropy_str} | "
+                f"T: {self.get_temperature():.2f} | "
+                f"Eff_k: {self.effective_k(alphas):.2f} | "
+                f"Penalty: {penalty_str} | "
+                f"Penalty/Loss: {penalty_ratio:.4f}"
+            )
         
         return loss
     
