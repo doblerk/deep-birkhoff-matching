@@ -4,6 +4,7 @@ __pycache__/
 
 # datasets
 data/datasets
+data/metadata/NCI1/NCI1_ged_matrices.pt
 
 # experiments
 res/

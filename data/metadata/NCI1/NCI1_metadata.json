@@ -1,0 +1,20 @@
+{
+    "dataset": "NCI1",
+    "num_graphs_total": 4110,
+    "num_graphs_filtered": 3290,
+    "num_total_pairs": 5410405,
+    "node_stats": {
+        "min_nodes": 3,
+        "max_nodes": 111,
+        "mean_nodes": 29.8654501216545,
+        "std_nodes": 13.563571093451857,
+        "lower_bound": 16.30187902820264,
+        "upper_bound": 43.42902121510636
+    },
+    "edge_stats": {
+        "min_edges": 4,
+        "max_edges": 238,
+        "mean_edges": 64.6,
+        "std_edges": 29.866289209467457
+    }
+}
