@@ -52,7 +52,7 @@ class ModelFactory:
             perm_vectors,
             AlphaMLP(encoder.output_dim, config.model.k),
             min_temp=0.8,
-            max_temp=3.0,
+            max_temp=4.0,
             entropy_weight=config.training.entropy_weight
         ).to(config.device)
 

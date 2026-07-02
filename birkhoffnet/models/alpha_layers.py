@@ -27,23 +27,23 @@ class AlphaMLP(nn.Module):
         #     nn.Linear(input_dim * 2, k)
         # )
         self.mlp = nn.Sequential(
-            nn.Linear(2 * input_dim, 2 * input_dim),
+            nn.Linear(4 * input_dim, 4 * input_dim),
             nn.GELU(),
-            nn.LayerNorm(2 * input_dim),
+            nn.LayerNorm(4 * input_dim),
             nn.Dropout(0.2),
-            nn.Linear(2 * input_dim, k)
+            nn.Linear(4 * input_dim, k)
         )
     
     def forward(self, g1, g2):
-        pair_repr = torch.cat([g1, g2], dim=-1)
-        return self.mlp(pair_repr)
-        # pair_repr = torch.cat([
-        #     g1,
-        #     g2,
-        #     torch.abs(g1 - g2),
-        #     g1 * g2
-        # ], dim=-1)
+        # pair_repr = torch.cat([g1, g2], dim=-1)
         # return self.mlp(pair_repr)
+        pair_repr = torch.cat([
+            g1,
+            g2,
+            torch.abs(g1 - g2),
+            g1 * g2
+        ], dim=-1)
+        return self.mlp(pair_repr)
 
 
 class AlphaBilinear(nn.Module):
@@ -157,8 +157,8 @@ class AlphaPermutationLayer(nn.Module):
     # --------------------------------------------------
     def get_alpha_weights(self, logits: torch.Tensor) -> torch.Tensor:
 
-        logits = logits - logits.mean(dim=1, keepdim=True)
-        logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
+        # logits = logits - logits.mean(dim=1, keepdim=True)
+        # logits = logits / (logits.std(dim=1, keepdim=True) + 1e-8)
         
         T = self.get_temperature()
         

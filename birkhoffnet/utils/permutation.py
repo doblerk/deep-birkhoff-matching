@@ -52,40 +52,75 @@ class PermutationPool:
     # Identity perturbation initialization
     # --------------------------------------------------
     
+    # def _init_identity_perturbations(self) -> torch.Tensor:
+    #     """Generate small perturbations around the identity matrix."""
+    #     perms = torch.zeros((self.k, self.max_n), dtype=torch.long)
+        
+    #     # Identity always first
+    #     perms[0] = torch.arange(0, self.max_n, dtype=torch.long)
+        
+    #     max_perturb_ratio = 0.4
+    #     max_swaps = max(1, int(self.max_n * max_perturb_ratio / 2))
+
+    #     for i in range(1, self.k):
+    #         n_swaps = torch.randint(
+    #             1, max_swaps + 1, (1,), 
+    #             generator=self.rng
+    #         ).item()
+
+    #         perms[i] = self._perturb_identity(n_swaps)
+        
+    #     return perms.to(self.device)
+
     def _init_identity_perturbations(self) -> torch.Tensor:
         """Generate small perturbations around the identity matrix."""
-        perms = torch.zeros((self.k, self.max_n), dtype=torch.long)
-        
+        perms = torch.empty((self.k, self.max_n), dtype=torch.long)
+
         # Identity always first
         perms[0] = torch.arange(0, self.max_n, dtype=torch.long)
-        
-        max_perturb_ratio = 0.4
-        max_swaps = max(1, int(self.max_n * max_perturb_ratio / 2))
 
-        for i in range(1, self.k):
-            n_swaps = torch.randint(
-                1, max_swaps + 1, (1,), 
-                generator=self.rng
-            ).item()
+        max_swaps = max(1, int(0.2 * self.max_n))
 
-            perms[i] = self._perturb_identity(n_swaps)
-        
+        swap_counts = torch.linspace(
+            1,
+            max_swaps,
+            self.k - 1,
+        ).round().long()
+
+        for i, n_swaps in enumerate(swap_counts, start=1):
+            perms[i] = self._perturb_identity(int(n_swaps))
+
         return perms.to(self.device)
     
-    def _perturb_identity(self, n_swaps):
+    def _perturb_identity(self, n_swaps: int) -> torch.Tensor:
+        """Perturb the identity permutation using distinct adjacent swaps."""
         perm = torch.arange(self.max_n)
-        
-        for _ in range(n_swaps):
-            i, j = torch.randint(
-                0, self.max_n, (2,), 
-                generator=self.rng
-            )
 
-            tmp = perm[i].item()
-            perm[i] = perm[j]
-            perm[j] = tmp
-        
+        # Random adjacent swap locations (without replacement)
+        swap_positions = torch.randperm(
+            self.max_n - 1,
+            generator=self.rng,
+        )[:n_swaps]
+
+        for pos in swap_positions.tolist():
+            perm[pos], perm[pos + 1] = perm[pos + 1], perm[pos]
+
         return perm
+    
+    # def _perturb_identity(self, n_swaps):
+    #     perm = torch.arange(self.max_n)
+        
+    #     for _ in range(n_swaps):
+    #         i, j = torch.randint(
+    #             0, self.max_n, (2,), 
+    #             generator=self.rng
+    #         )
+
+    #         tmp = perm[i].item()
+    #         perm[i] = perm[j]
+    #         perm[j] = tmp
+        
+    #     return perm
     
     # --------------------------------------------------
     # Hungarian initialization
