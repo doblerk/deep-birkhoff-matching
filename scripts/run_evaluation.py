@@ -18,10 +18,15 @@ def get_args_parser():
 def main(args):
 
     config, _, ged_data, valid_indices, _, _, test_indices = load_data(args.params)
+    # config = None
+
+    # valid_indices = np.load("res/journal/bpged/IMDB-MULTI_valid_idx.npy")
+    # distances = np.load("res/journal/bpged/imdb")
 
     output_dir = Path(config.output_dir)
 
     log_file = output_dir / "log_evaluation.txt"
+    # log_file = "res/journal/bpged/log_evaluation.txt"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",

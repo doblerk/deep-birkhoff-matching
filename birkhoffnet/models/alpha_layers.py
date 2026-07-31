@@ -182,6 +182,8 @@ class AlphaPermutationLayer(nn.Module):
     def effective_k(self, alphas: torch.Tensor) -> torch.Tensor:
         entropy = self.get_entropy(alphas)
         return torch.exp(entropy * math.log(self.k))
+        # entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=1)
+        # return torch.exp(entropy)
     
     # --------------------------------------------------
     # Loss
@@ -268,4 +270,6 @@ class AlphaPermutationLayer(nn.Module):
             cols = self.perm_vectors[k_idx]
             soft[:, rows, cols] += alphas[:, k_idx].unsqueeze(-1)
 
-        return soft, alphas
+        # k_eff = self.effective_k(alphas)
+
+        return soft, alphas#, k_eff

@@ -1,0 +1,20 @@
+{
+    "dataset": "BZR",
+    "num_graphs_total": 405,
+    "num_graphs_filtered": 290,
+    "num_total_pairs": 41905,
+    "node_stats": {
+        "min_nodes": 13,
+        "max_nodes": 57,
+        "mean_nodes": 35.75061728395062,
+        "std_nodes": 7.258509241509856,
+        "lower_bound": 28.492108042440762,
+        "upper_bound": 43.00912652546047
+    },
+    "edge_stats": {
+        "min_edges": 26,
+        "max_edges": 120,
+        "mean_edges": 76.71604938271605,
+        "std_edges": 15.389297682417324
+    }
+}

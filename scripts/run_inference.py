@@ -10,7 +10,7 @@ from pathlib import Path
 
 from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset
-from torch_geometric.transforms import Constant
+from torch_geometric.transforms import NormalizeFeatures, Constant
 
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
 from birkhoffnet.losses.ged_loss import GEDLoss
@@ -109,10 +109,14 @@ def main(args):
     # 1. Load dataset
     # --------------------------------------------------
 
+    use_attrs = True
+    transform = NormalizeFeatures() if use_attrs else None
+
     dataset_full = TUDataset(
-        root=config.dataset_dir, 
+        root=config.dataset_dir,
         name=config.dataset,
-        use_node_attr=False
+        use_node_attr=use_attrs,
+        transform=transform
     )
 
     if not hasattr(dataset_full[0], 'x') or dataset_full[0].x is None:

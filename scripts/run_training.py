@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from torch_geometric.datasets import TUDataset
-from torch_geometric.transforms import Constant
+from torch_geometric.transforms import NormalizeFeatures, Constant
 
 from birkhoffnet.utils.config import load_data
 from birkhoffnet.utils.dataloader_utils import DataLoaders
@@ -43,10 +43,14 @@ def main(args):
     # 1. Load base dataset
     # --------------------------------------------------
     
+    use_attrs = True
+    transform = NormalizeFeatures() if use_attrs else None
+
     dataset_full = TUDataset(
-        root=config.dataset_dir, 
+        root=config.dataset_dir,
         name=config.dataset,
-        use_node_attr=False
+        use_node_attr=use_attrs,
+        transform=transform
     )
 
     if not hasattr(dataset_full[0], 'x') or dataset_full[0].x is None:

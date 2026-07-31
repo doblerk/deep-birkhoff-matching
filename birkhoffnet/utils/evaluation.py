@@ -12,7 +12,7 @@ from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset, GEDDataset
 from torch_geometric.utils import to_networkx
-from torch_geometric.transforms import Constant
+from torch_geometric.transforms import NormalizeFeatures, Constant
 
 from birkhoffnet.datasets.siamese_dataset import SiameseDataset
 from birkhoffnet.datasets.triplet_dataset import TripletDataset
@@ -129,11 +129,12 @@ class CustomGraphPairDataset(Dataset):
 
 def plot_assignments_and_alphas(
         dataset,
-        idx1, 
-        idx2, 
-        soft_assignment, 
-        alphas
-    ):
+        idx1,
+        idx2,
+        soft_assignment,
+        alphas,
+        threshold=0.15,
+):
 
     g1 = dataset[idx1]
     g2 = dataset[idx2]
@@ -144,85 +145,350 @@ def plot_assignments_and_alphas(
     real_n1 = len(G1.nodes)
     real_n2 = len(G2.nodes)
 
-    node_labels1 = g1.x.argmax(dim=1).numpy()
-    node_labels2 = g2.x.argmax(dim=1).numpy()
+    node_labels1 = g1.x.argmax(dim=1).cpu().numpy()
+    node_labels2 = g2.x.argmax(dim=1).cpu().numpy()
+
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
 
     pos1 = nx.kamada_kawai_layout(G1)
     pos2 = nx.kamada_kawai_layout(G2)
 
-    for i in range(real_n1, real_n2):
-        pos1[i] = [-1.0, i - real_n1]
+    # normalize layouts
+    for p in (pos1, pos2):
+        xs = np.array([v[0] for v in p.values()])
+        ys = np.array([v[1] for v in p.values()])
 
-    for key in pos2:
-        pos2[key][0] += 3  # Offset second graph
+        for k in p:
+            p[k][0] = (p[k][0] - xs.mean()) / xs.std()
+            p[k][1] = (p[k][1] - ys.mean()) / ys.std()
 
-    color_list = sns.color_palette("tab20", 20) + sns.color_palette("Set3", 9)
+    # move G2 to the right
+    gap = 4.5
+    for k in pos2:
+        pos2[k][0] += gap
 
-    # Create the figure with two subplots
+    # ------------------------------------------------------------------
+    # Dummy nodes
+    # ------------------------------------------------------------------
+
+    n_dummy = real_n2 - real_n1
+
+    if n_dummy > 0:
+
+        x_dummy = max(v[0] for v in pos1.values()) + 0.55
+
+        ymin = min(v[1] for v in pos1.values())
+        ymax = max(v[1] for v in pos1.values())
+
+        ys = np.linspace(ymin, ymax, n_dummy)
+
+        dummy_pos = {}
+
+        for idx, node in enumerate(range(real_n1, real_n2)):
+            pos1[node] = np.array([x_dummy, ys[idx]])
+            dummy_pos[node] = pos1[node]
+
+    else:
+        dummy_pos = {}
+
+    # ------------------------------------------------------------------
+    # Colors
+    # ------------------------------------------------------------------
+
+    palette = sns.color_palette("tab20", 20) + sns.color_palette("Set3", 9)
+
     fig, (ax1, ax2) = plt.subplots(
-        1, 2, figsize=(14, 6), 
-        gridspec_kw={'width_ratios': [2, 1]}
+        1,
+        2,
+        figsize=(14, 6),
+        gridspec_kw={"width_ratios": [2.4, 1]},
     )
 
-    # --- Graph + Soft Assignments ---
-    nx.draw(
+    # ------------------------------------------------------------------
+    # Draw graph edges first
+    # ------------------------------------------------------------------
+
+    nx.draw_networkx_edges(
         G1,
-        pos=pos1, 
-        ax=ax1, 
-        node_color=[color_list[l] for l in node_labels1],
-        edge_color='gray', 
-        with_labels=False
+        pos1,
+        ax=ax1,
+        edge_color="0.75",
+        width=1.0,
     )
 
-    nx.draw(
-        G2, 
-        pos=pos2, 
-        ax=ax1, 
-        node_color=[color_list[l] for l in node_labels2],
-        edge_color='gray', 
-        with_labels=False
+    nx.draw_networkx_edges(
+        G2,
+        pos2,
+        ax=ax1,
+        edge_color="0.75",
+        width=1.0,
     )
 
-    ax1.scatter(
-        [pos1[i][0] for i in range(real_n1, real_n2)],
-        [pos1[i][1] for i in range(real_n1, real_n2)],
-        color='black',
-        marker='x',
-        s=100,
-        label='Dummy G1'
-    )
+    # ------------------------------------------------------------------
+    # Soft assignments
+    # ------------------------------------------------------------------
 
     soft_assignment = soft_assignment.cpu()
 
-    for i in range(len(G2.nodes)):
-        for j in range(len(G2.nodes)):
-            
-            weight = float(soft_assignment[i, j])
-            
-            x_vals = [pos1[i][0], pos2[j][0]]
-            y_vals = [pos1[i][1], pos2[j][1]]
-            
+    for i in range(real_n2):
+
+        for j in range(real_n2):
+
+            w = float(soft_assignment[i, j])
+
+            if w < threshold:
+                continue
+
             ax1.plot(
-                x_vals, 
-                y_vals, 
-                color='red', 
-                alpha=weight, 
-                linewidth=2 * weight
+                [pos1[i][0], pos2[j][0]],
+                [pos1[i][1], pos2[j][1]],
+                color="crimson",
+                alpha=min(1.0, 0.3 + w),
+                linewidth=2 * w,
+                zorder=1,
             )
 
-    ax1.set_title(f"Soft Assignments (G{idx1} ↔ G{idx2})")
-    ax1.axis('off')
+    # ------------------------------------------------------------------
+    # Real nodes
+    # ------------------------------------------------------------------
 
-    # --- Alpha Distribution ---
-    ax2.bar(range(len(alphas)), alphas)
+    nx.draw_networkx_nodes(
+        G1,
+        pos1,
+        nodelist=range(real_n1),
+        node_color=[palette[c] for c in node_labels1],
+        node_size=320,
+        edgecolors="black",
+        linewidths=0.7,
+        ax=ax1,
+    )
 
-    ax2.set_title("Permutation Weights (alphas)")
+    nx.draw_networkx_nodes(
+        G2,
+        pos2,
+        node_color=[palette[c] for c in node_labels2],
+        node_size=320,
+        edgecolors="black",
+        linewidths=0.7,
+        ax=ax1,
+    )
+
+    # ------------------------------------------------------------------
+    # Dummy nodes
+    # ------------------------------------------------------------------
+
+    if len(dummy_pos):
+
+        ax1.scatter(
+            [p[0] for p in dummy_pos.values()],
+            [p[1] for p in dummy_pos.values()],
+            marker="X",
+            s=160,
+            color="dimgray",
+            edgecolors="white",
+            linewidths=1.2,
+            zorder=5,
+            label="Dummy nodes",
+        )
+
+    # ------------------------------------------------------------------
+    # Labels
+    # ------------------------------------------------------------------
+
+    g1_x = [pos1[i][0] for i in range(real_n1)]
+    g2_x = [pos2[i][0] for i in range(real_n2)]
+
+    y_text = max(
+        max(pos1[i][1] for i in range(real_n1)),
+        max(pos2[i][1] for i in range(real_n2))
+    ) + 0.5
+
+    ax1.text(
+        np.mean(g1_x),
+        y_text,
+        r"$G_1$",
+        ha="center",
+        fontsize=14,
+        fontweight="bold",
+    )
+
+    ax1.text(
+        np.mean(g2_x),
+        y_text,
+        r"$G_2$",
+        ha="center",
+        fontsize=14,
+        fontweight="bold",
+    )
+
+    # if n_dummy > 0:
+    #     ax1.text(
+    #         x_dummy,
+    #         y_text,
+    #         "Dummy",
+    #         ha="center",
+    #         fontsize=12,
+    #     )
+
+    # if len(dummy_pos):
+    #     ax1.text(
+    #         x_dummy,
+    #         1.8,
+    #         "Dummy",
+    #         fontsize=12,
+    #         ha="center",
+    #     )
+
+    # ax1.text(
+    #     np.mean([v[0] for v in pos2.values()]),
+    #     1.8,
+    #     r"$G_2$",
+    #     fontsize=14,
+    #     ha="center",
+    #     fontweight="bold",
+    # )
+
+    ax1.axis("off")
+
+    # ------------------------------------------------------------------
+    # Alpha histogram
+    # ------------------------------------------------------------------
+
+    ax2.bar(
+        np.arange(len(alphas)),
+        alphas,
+        color="steelblue",
+        width=0.8,
+    )
+
     ax2.set_xlabel("Permutation index")
-    ax2.set_ylabel("Weight")
-    ax2.set_ylim(0.0, 1.0)
+    ax2.set_ylabel(r"$\alpha$")
+    ax2.set_xticks(
+        np.arange(0, len(alphas), 5),
+        labels=np.arange(1, len(alphas) + 1, 5)
+    )
+    ax2.set_ylim(0, 1.0)
+
+    sns.despine(ax=ax2)
 
     plt.tight_layout()
-    plt.show()
+    # plt.show()
+    plt.savefig(f"res/journal/PROTEINS_full/assignment_{idx1}_{idx2}.pdf", dpi=400)
+    plt.close()
+
+
+# def plot_assignments_and_alphas(
+#         dataset,
+#         idx1, 
+#         idx2, 
+#         soft_assignment, 
+#         alphas
+#     ):
+
+#     g1 = dataset[idx1]
+#     g2 = dataset[idx2]
+
+#     G1 = to_networkx(g1, to_undirected=True)
+#     G2 = to_networkx(g2, to_undirected=True)
+
+#     real_n1 = len(G1.nodes)
+#     real_n2 = len(G2.nodes)
+
+#     node_labels1 = g1.x.argmax(dim=1).numpy()
+#     node_labels2 = g2.x.argmax(dim=1).numpy()
+
+#     pos1 = nx.kamada_kawai_layout(G1)
+#     pos2 = nx.kamada_kawai_layout(G2)
+
+#     # for i in range(real_n1, real_n2):
+#     #     pos1[i] = [-1.0, i - real_n1]
+
+#     x_dummy = max(p[0] for p in pos1.values()) + 0.35
+
+#     ys = np.linspace(
+#         min(y for _, y in pos1.values()),
+#         max(y for _, y in pos1.values()),
+#         real_n2 - real_n1,
+#     )
+
+#     for k, i in enumerate(range(real_n1, real_n2)):
+#         pos1[i] = (x_dummy, ys[k])
+
+#     for key in pos2:
+#         pos2[key][0] += 3  # Offset second graph
+
+#     color_list = sns.color_palette("tab20", 20) + sns.color_palette("Set3", 9)
+
+#     # Create the figure with two subplots
+#     fig, (ax1, ax2) = plt.subplots(
+#         1, 2, figsize=(14, 6), 
+#         gridspec_kw={'width_ratios': [2, 1]}
+#     )
+
+#     # --- Graph + Soft Assignments ---
+#     nx.draw(
+#         G1,
+#         pos=pos1, 
+#         ax=ax1, 
+#         node_color=[color_list[l] for l in node_labels1],
+#         edge_color='gray', 
+#         with_labels=False
+#     )
+
+#     nx.draw(
+#         G2, 
+#         pos=pos2, 
+#         ax=ax1, 
+#         node_color=[color_list[l] for l in node_labels2],
+#         edge_color='gray', 
+#         with_labels=False
+#     )
+
+#     ax1.scatter(
+#         [pos1[i][0] for i in range(real_n1, real_n2)],
+#         [pos1[i][1] for i in range(real_n1, real_n2)],
+#         color='black',
+#         marker='x',
+#         s=100,
+#         label='Dummy G1'
+#     )
+
+#     soft_assignment = soft_assignment.cpu()
+
+#     for i in range(len(G2.nodes)):
+#         for j in range(len(G2.nodes)):
+            
+#             weight = float(soft_assignment[i, j])
+            
+#             x_vals = [pos1[i][0], pos2[j][0]]
+#             y_vals = [pos1[i][1], pos2[j][1]]
+            
+#             ax1.plot(
+#                 x_vals, 
+#                 y_vals, 
+#                 color='red', 
+#                 alpha=weight, 
+#                 linewidth=2 * weight
+#             )
+
+#     # ax1.set_title(f"Soft Assignments (G{idx1} ↔ G{idx2})")
+#     ax1.axis('off')
+
+#     # --- Alpha Distribution ---
+#     # ax2.bar(range(len(alphas)), alphas)
+#     ax2.bar(np.arange(len(alphas)), alphas, width=0.8)
+
+#     # ax2.set_title("Permutation Weights (alphas)")
+#     ax2.set_xlabel("Permutation index")
+#     ax2.set_ylabel("Weight")
+#     ax2.set_ylim(0.0, 1.0)
+
+#     plt.tight_layout()
+#     # plt.show()
+#     plt.savefig(f"res/journal/PROTEINS_full/assignment_{idx1}_{idx2}.pdf", dpi=400)
+#     plt.close()
 
 
 # def main():
@@ -366,10 +632,14 @@ def main(args):
     # 1. Load dataset
     # --------------------------------------------------
 
+    use_attrs = True
+    transform = NormalizeFeatures() if use_attrs else None
+
     dataset_full = TUDataset(
-        root=config.dataset_dir, 
+        root=config.dataset_dir,
         name=config.dataset,
-        use_node_attr=False
+        use_node_attr=use_attrs,
+        transform=transform
     )
 
     # --------------------------------------------------
@@ -443,15 +713,18 @@ def main(args):
     # --------------------------------------------------
 
     # indices = [1, 4, 8, 2, 0, 3]
-    indices = [2, 2, 4, 6, 7, 9]
+    # indices = [2, 2, 4, 6, 7, 9]
+    # indices = [2, 2, 56, 349, 380]
+    # indices = [2, 2, 80, 267, 349, 380]
+    indices = [2, 2, 56, 267]
 
-    print(
-        norm_ged_matrix[1, 4].item(),
-        norm_ged_matrix[1, 8].item(),
-        norm_ged_matrix[1, 2].item(),
-        norm_ged_matrix[1, 0].item(),
-        norm_ged_matrix[1, 3].item()
-    )
+    # print(
+    #     norm_ged_matrix[1, 4].item(),
+    #     norm_ged_matrix[1, 8].item(),
+    #     norm_ged_matrix[1, 2].item(),
+    #     norm_ged_matrix[1, 0].item(),
+    #     norm_ged_matrix[1, 3].item()
+    # )
 
     selected_graphs = [dataset[i] for i in indices]
 
@@ -472,7 +745,7 @@ def main(args):
 
     loader = DataLoader(
         data,
-        batch_size=5,
+        batch_size=3,
         collate_fn=lambda batch: (
             Batch.from_data_list([x[0] for x in batch]),
             Batch.from_data_list([x[1] for x in batch]),
@@ -585,11 +858,18 @@ def main(args):
     # 9. Visualization
     # --------------------------------------------------
 
+    dataset_full = TUDataset(
+        root=config.dataset_dir,
+        name=config.dataset,
+    )
+
+    dataset = [dataset_full[i] for i in valid_indices]
+
     plot_assignments_and_alphas(dataset, indices[0], indices[1], assignment_matrix[0].cpu(), alphas[0].cpu().numpy())
     plot_assignments_and_alphas(dataset, indices[0], indices[2], assignment_matrix[1].cpu(), alphas[1].cpu().numpy())
     plot_assignments_and_alphas(dataset, indices[0], indices[3], assignment_matrix[2].cpu(), alphas[2].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[4], assignment_matrix[3].cpu(), alphas[3].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[5], assignment_matrix[4].cpu(), alphas[4].cpu().numpy())
+    # plot_assignments_and_alphas(dataset, indices[0], indices[4], assignment_matrix[3].cpu(), alphas[3].cpu().numpy())
+    # plot_assignments_and_alphas(dataset, indices[0], indices[5], assignment_matrix[4].cpu(), alphas[4].cpu().numpy())
 
 
 if __name__ == '__main__':

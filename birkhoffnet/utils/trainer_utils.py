@@ -320,6 +320,9 @@ class SiameseTrainer:
         total_loss = 0
         total_samples = 0
 
+        # preds = []
+        # ks = []
+
         for graphs_a, graphs_b, target_similarity in loader:
 
             graphs_a = graphs_a.to(self.config.device)
@@ -349,6 +352,11 @@ class SiameseTrainer:
                 graph_emb_b,
             )
 
+            # assignment_matrix, alphas, k_eff = self.alpha_layer(
+            #     graph_emb_a,
+            #     graph_emb_b,
+            # )
+
             assignment_matrix = self._normalize_assignment(
                 assignment_matrix,
                 node_mask_a,
@@ -368,6 +376,9 @@ class SiameseTrainer:
                 -pred_ged / avg_num_nodes
             )
 
+            # preds.extend(pred_similarity.cpu().numpy().tolist())
+            # ks.extend(k_eff.cpu().numpy().tolist())
+
             loss = self.alpha_layer.loss_fn(
                 pred_similarity,
                 target_similarity,
@@ -377,6 +388,9 @@ class SiameseTrainer:
 
             total_loss += loss.item() * batch_size
             total_samples += batch_size
+
+        # np.save("res/journal/PROTEINS_full/predicted_ged.npy", np.array(preds))
+        # np.save("res/journal/PROTEINS_full/effective_ks.npy", np.array(ks))
 
         return total_loss / total_samples
     
