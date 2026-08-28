@@ -375,7 +375,7 @@ def plot_assignments_and_alphas(
 
     plt.tight_layout()
     # plt.show()
-    plt.savefig(f"res/journal/PROTEINS_full/assignment_{idx1}_{idx2}.pdf", dpi=400)
+    plt.savefig(f"res/journal/BZR/assignment_{idx1}_{idx2}.pdf", dpi=400)
     plt.close()
 
 
@@ -716,7 +716,12 @@ def main(args):
     # indices = [2, 2, 4, 6, 7, 9]
     # indices = [2, 2, 56, 349, 380]
     # indices = [2, 2, 80, 267, 349, 380]
-    indices = [2, 2, 56, 267]
+
+    # PROTEINS:
+    # indices = [2, 2, 56, 267]
+
+    # BZR:
+    indices = [1, 3, 85, 98]
 
     # print(
     #     norm_ged_matrix[1, 4].item(),
@@ -853,6 +858,9 @@ def main(args):
             )
 
             print(pred_similarity)
+
+            entropy = -(alphas * alphas.log()).sum(dim=1)
+            print(torch.exp(entropy))
 
     # --------------------------------------------------
     # 9. Visualization
