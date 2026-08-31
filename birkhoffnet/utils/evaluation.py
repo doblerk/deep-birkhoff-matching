@@ -173,21 +173,44 @@ def plot_assignments_and_alphas(
     # Dummy nodes
     # ------------------------------------------------------------------
 
+    # n_dummy = real_n2 - real_n1
+
+    # if n_dummy > 0:
+
+    #     x_dummy = max(v[0] for v in pos1.values()) + 0.55
+
+    #     ymin = min(v[1] for v in pos1.values())
+    #     ymax = max(v[1] for v in pos1.values())
+
+    #     ys = np.linspace(ymin, ymax, n_dummy)
+
+    #     dummy_pos = {}
+
+    #     for idx, node in enumerate(range(real_n1, real_n2)):
+    #         pos1[node] = np.array([x_dummy, ys[idx]])
+    #         dummy_pos[node] = pos1[node]
+
+    # else:
+    #     dummy_pos = {}
+
     n_dummy = real_n2 - real_n1
 
     if n_dummy > 0:
 
-        x_dummy = max(v[0] for v in pos1.values()) + 0.55
-
+        xmin = min(v[0] for v in pos1.values())
+        xmax = max(v[0] for v in pos1.values())
         ymin = min(v[1] for v in pos1.values())
-        ymax = max(v[1] for v in pos1.values())
 
-        ys = np.linspace(ymin, ymax, n_dummy)
+        # Position below G1
+        y_dummy = ymin - 0.5
+
+        # Horizontal positions
+        xs = np.linspace(xmin, xmax, n_dummy)
 
         dummy_pos = {}
 
         for idx, node in enumerate(range(real_n1, real_n2)):
-            pos1[node] = np.array([x_dummy, ys[idx]])
+            pos1[node] = np.array([xs[idx], y_dummy])
             dummy_pos[node] = pos1[node]
 
     else:
@@ -372,7 +395,7 @@ def plot_assignments_and_alphas(
 
     alpha_min = np.min(alphas)
     alpha_max = np.max(alphas)
-    margin = 0.2 * (alpha_max - alpha_min)
+    margin = 0.05 * (alpha_max - alpha_min) # or 0.3
 
     ax2.set_ylim(
         max(0, alpha_min - margin),
@@ -384,7 +407,7 @@ def plot_assignments_and_alphas(
 
     plt.tight_layout()
     # plt.show()
-    plt.savefig(f"res/journal/PROTEINS_full/assignment_{idx1}_{idx2}_scaled.pdf", dpi=400)
+    plt.savefig(f"res/journal/BZR/identity/assignment_{idx1}_{idx2}.pdf", dpi=500)
     plt.close()
 
 
@@ -730,10 +753,10 @@ def main(args):
     # indices = [2, 2, 56, 267]
     # indices = [2] + list(range(100))
     # indices = [2, 2, 56, 267, 9, 28, 43, 48, 88]
-    indices = [2, 43]
+    # indices = [2, 43]
 
     # BZR:
-    # indices = [1, 3, 85, 98]
+    indices = [1, 3, 85, 98]
 
     # print(
     #     norm_ged_matrix[1, 4].item(),
