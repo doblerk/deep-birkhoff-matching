@@ -369,13 +369,22 @@ def plot_assignments_and_alphas(
         np.arange(0, len(alphas), 5),
         labels=np.arange(1, len(alphas) + 1, 5)
     )
-    ax2.set_ylim(0, 1.0)
+
+    alpha_min = np.min(alphas)
+    alpha_max = np.max(alphas)
+    margin = 0.2 * (alpha_max - alpha_min)
+
+    ax2.set_ylim(
+        max(0, alpha_min - margin),
+        alpha_max + margin,
+    )
+    # ax2.set_ylim(0, 1.0)
 
     sns.despine(ax=ax2)
 
     plt.tight_layout()
     # plt.show()
-    plt.savefig(f"res/journal/BZR/assignment_{idx1}_{idx2}.pdf", dpi=400)
+    plt.savefig(f"res/journal/PROTEINS_full/assignment_{idx1}_{idx2}_scaled.pdf", dpi=400)
     plt.close()
 
 
@@ -719,9 +728,12 @@ def main(args):
 
     # PROTEINS:
     # indices = [2, 2, 56, 267]
+    # indices = [2] + list(range(100))
+    # indices = [2, 2, 56, 267, 9, 28, 43, 48, 88]
+    indices = [2, 43]
 
     # BZR:
-    indices = [1, 3, 85, 98]
+    # indices = [1, 3, 85, 98]
 
     # print(
     #     norm_ged_matrix[1, 4].item(),
@@ -750,7 +762,7 @@ def main(args):
 
     loader = DataLoader(
         data,
-        batch_size=3,
+        batch_size=len(indices),
         collate_fn=lambda batch: (
             Batch.from_data_list([x[0] for x in batch]),
             Batch.from_data_list([x[1] for x in batch]),
@@ -859,7 +871,7 @@ def main(args):
 
             print(pred_similarity)
 
-            entropy = -(alphas * alphas.log()).sum(dim=1)
+            entropy = -(alphas * alphas.clamp_min(1e-8).log()).sum(dim=1)
             print(torch.exp(entropy))
 
     # --------------------------------------------------
@@ -873,11 +885,8 @@ def main(args):
 
     dataset = [dataset_full[i] for i in valid_indices]
 
-    plot_assignments_and_alphas(dataset, indices[0], indices[1], assignment_matrix[0].cpu(), alphas[0].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[2], assignment_matrix[1].cpu(), alphas[1].cpu().numpy())
-    plot_assignments_and_alphas(dataset, indices[0], indices[3], assignment_matrix[2].cpu(), alphas[2].cpu().numpy())
-    # plot_assignments_and_alphas(dataset, indices[0], indices[4], assignment_matrix[3].cpu(), alphas[3].cpu().numpy())
-    # plot_assignments_and_alphas(dataset, indices[0], indices[5], assignment_matrix[4].cpu(), alphas[4].cpu().numpy())
+    for i in range(1, len(indices)):
+        plot_assignments_and_alphas(dataset, indices[0], indices[i], assignment_matrix[i-1].cpu(), alphas[i-1].cpu().numpy())
 
 
 if __name__ == '__main__':
